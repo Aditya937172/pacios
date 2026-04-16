@@ -1,0 +1,15 @@
+.env
+.env.*
+.vercel/
+*.log
+*.pyc
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+server.out.log
+server.err.log
+uvicorn.out.log
+uvicorn.err.log
+agent_smoke_results.json
+agent_test_results.json

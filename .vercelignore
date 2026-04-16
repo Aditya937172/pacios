@@ -1,0 +1,11 @@
+.env
+.env.*
+.git
+.gitignore
+.vscode
+.venv
+venv
+__pycache__
+*.log
+agent_smoke_results.json
+agent_test_results.json

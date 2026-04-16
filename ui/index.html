@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PacificaEdge | Intelligence Terminal</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="terminal-shell">
+        <div class="ambient ambient-one"></div>
+        <div class="ambient ambient-two"></div>
+
+        <header class="top-nav">
+            <div class="brand-lockup">
+                <div class="brand-mark">
+                    <span class="brand-core"></span>
+                </div>
+                <div class="brand-copy">
+                    <div class="brand-row">
+                        <div class="logo">PacificaEdge</div>
+                        <div class="subtitle">Intelligence terminal</div>
+                    </div>
+                    <div class="proof-row">
+                        <span class="proof-pill">Pacifica API</span>
+                        <span class="proof-pill">Elfa AI</span>
+                        <span class="proof-pill">AI Synthesis</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="nav-tabs" id="marketTabs">
+                <button class="active" data-market="BTC-USDC">BTC-USDC</button>
+                <button data-market="ETH-USDC">ETH-USDC</button>
+                <button data-market="SOL-USDC">SOL-USDC</button>
+                <button data-market="ALL">All markets</button>
+            </div>
+
+            <div class="nav-status">
+                <div class="live-status">
+                    <span class="pulse-dot"></span>
+                    <span id="liveLabel">Live desk cache active</span>
+                </div>
+                <div class="status-meta">
+                    <span>Judges view</span>
+                    <span id="statusTimestamp">14:32 UTC</span>
+                </div>
+            </div>
+        </header>
+
+        <section class="macro-banner">
+            <div class="macro-icon">!</div>
+            <div class="macro-copy">
+                <div class="macro-title" id="macroTitle">Macro alert: Risk-on detected across BTC, ETH, SOL simultaneously</div>
+                <div class="macro-subtitle" id="macroSubtitle">Funding reset, short liquidations, and orderbook support are aligned with broad market momentum.</div>
+            </div>
+            <div class="macro-meta" id="macroMeta">Regime: Expansion | Volatility: Elevated</div>
+        </section>
+
+        <main class="dashboard-grid">
+            <section class="hero-panel panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="eyebrow">Agent Command</div>
+                        <h1>Frontdesk plus six specialist agents</h1>
+                    </div>
+                    <div class="hero-chip">Primary focus: <span id="heroMarket">BTC-USDC</span></div>
+                </div>
+
+                <div class="hero-layout">
+                    <div class="hero-summary">
+                        <div class="decision-kicker">Final desk call</div>
+                        <div class="decision-row">
+                            <div class="final-signal bullish-text" id="finalSignal">BUY</div>
+                            <div class="decision-context">
+                                <div class="decision-score">
+                                    <span id="agentConsensus">4 of 6 agents bullish</span>
+                                    <strong id="confidenceValue">67%</strong>
+                                </div>
+                                <div class="confidence-track">
+                                    <div class="confidence-fill" id="confidenceFill"></div>
+                                </div>
+                                <div class="decision-tags">
+                                    <span id="macroRegimeTag">Macro expansion</span>
+                                    <span id="pressureTag">Short squeeze</span>
+                                    <span id="liquidityTag">Bid support</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="summary-grid">
+                            <article class="summary-card">
+                                <span class="summary-label">Why the desk agrees</span>
+                                <p id="deskSummary">Negative funding, rising price structure, and strong bid-side depth keep the desk tilted long.</p>
+                            </article>
+                            <article class="summary-card warning-card">
+                                <span class="summary-label">Main pushback</span>
+                                <p id="deskRisk">A visible ask wall near local highs is capping immediate continuation and keeps conviction below full size.</p>
+                            </article>
+                        </div>
+                    </div>
+
+                    <div class="judge-proof">
+                        <div class="proof-header">
+                            <div class="eyebrow">Market Team</div>
+                            <span>Live desk state across the three core markets</span>
+                        </div>
+                        <div class="proof-points">
+                            <div class="proof-card" id="summaryCardBtc">
+                                <span class="proof-value" id="summaryBtcSignal">BUY</span>
+                                <span class="proof-text" id="summaryBtcText">BTC-USDC | 67% confidence</span>
+                            </div>
+                            <div class="proof-card" id="summaryCardEth">
+                                <span class="proof-value" id="summaryEthSignal">BUY</span>
+                                <span class="proof-text" id="summaryEthText">ETH-USDC | 61% confidence</span>
+                            </div>
+                            <div class="proof-card" id="summaryCardSol">
+                                <span class="proof-value" id="summarySolSignal">HOLD</span>
+                                <span class="proof-text" id="summarySolText">SOL-USDC | 49% confidence</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="snapshot-panel panel">
+                <div class="panel-header compact">
+                    <div>
+                        <div class="eyebrow">Market Snapshot</div>
+                        <h2>Terminal overview</h2>
+                    </div>
+                </div>
+                <div class="metrics-row" id="metricsRow">
+                    <div class="metric-card">
+                        <div class="metric-label">Price</div>
+                        <div class="metric-value" id="metricPrice">$94,231</div>
+                        <div class="metric-change bullish-text" id="metricPriceChange">+2.31% today</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Open interest</div>
+                        <div class="metric-value" id="metricOi">$234M</div>
+                        <div class="metric-change bullish-text" id="metricOiChange">+4.2% rising</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Volume 24h</div>
+                        <div class="metric-value" id="metricVolume">$1.2B</div>
+                        <div class="metric-change bullish-text" id="metricVolumeChange">+11% vs yesterday</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Funding APY</div>
+                        <div class="metric-value bearish-text" id="metricFunding">-16.4%</div>
+                        <div class="metric-change accent-text" id="metricFundingCopy">Earn 16.4% delta-neutral now</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="agents-panel panel">
+                <div class="panel-header compact">
+                    <div>
+                        <div class="eyebrow">Agent Team</div>
+                        <h2>Frontdesk plus six specialists driving the desk</h2>
+                    </div>
+                    <div class="panel-note">Click any agent to inspect its evidence, reasoning, and latest discussion topics.</div>
+                </div>
+
+                <div class="agent-grid" id="agentGrid">
+                    <button class="agent-card active" data-agent="frontdesk">
+                        <div class="agent-topline">
+                            <span class="agent-index">00</span>
+                            <span class="verdict verdict-neutral">Desk</span>
+                        </div>
+                        <h3>Frontdesk Agent</h3>
+                        <div class="agent-metric">Team synthesis</div>
+                        <p>Combines all specialist reports, explains the decision in simple language, and points to the strongest proof.</p>
+                        <div class="agent-footer">
+                            <span>Decision desk</span>
+                            <span>All agents</span>
+                        </div>
+                    </button>
+
+                    <button class="agent-card" data-agent="market">
+                        <div class="agent-topline">
+                            <span class="agent-index">01</span>
+                            <span class="verdict verdict-bullish">Bullish</span>
+                        </div>
+                        <h3>Market Agent</h3>
+                        <div class="agent-metric">Trend continuation</div>
+                        <p>Tracks price structure, momentum, EMA posture, and open interest direction.</p>
+                        <div class="agent-footer">
+                            <span>Strength 82%</span>
+                            <span>Price > EMA</span>
+                        </div>
+                    </button>
+
+                    <button class="agent-card" data-agent="funding">
+                        <div class="agent-topline">
+                            <span class="agent-index">02</span>
+                            <span class="verdict verdict-bullish">Bullish</span>
+                        </div>
+                        <h3>Funding Agent</h3>
+                        <div class="agent-metric">Crowded shorts</div>
+                        <p>Reads funding imbalance, APY opportunity, and crowding risk in perpetual positioning.</p>
+                        <div class="agent-footer">
+                            <span>Strength 90%</span>
+                            <span>-16.4% APY</span>
+                        </div>
+                    </button>
+
+                    <button class="agent-card" data-agent="liquidation">
+                        <div class="agent-topline">
+                            <span class="agent-index">03</span>
+                            <span class="verdict verdict-bullish">Bullish</span>
+                        </div>
+                        <h3>Liquidation Agent</h3>
+                        <div class="agent-metric">Squeeze pressure</div>
+                        <p>Monitors forced closes, one-sided wipeouts, and pressure cascades in the tape.</p>
+                        <div class="agent-footer">
+                            <span>Strength 85%</span>
+                            <span>Shorts 3x longs</span>
+                        </div>
+                    </button>
+
+                    <button class="agent-card" data-agent="sentiment">
+                        <div class="agent-topline">
+                            <span class="agent-index">04</span>
+                            <span class="verdict verdict-bullish">Bullish</span>
+                        </div>
+                        <h3>Sentiment Agent</h3>
+                        <div class="agent-metric">Social momentum</div>
+                        <p>Measures Elfa mention velocity, ranking strength, and smart-money conversation heat.</p>
+                        <div class="agent-footer">
+                            <span>Strength 74%</span>
+                            <span>71 / 100 score</span>
+                        </div>
+                    </button>
+
+                    <button class="agent-card" data-agent="narrative">
+                        <div class="agent-topline">
+                            <span class="agent-index">05</span>
+                            <span class="verdict verdict-neutral">Neutral</span>
+                        </div>
+                        <h3>Narrative Agent</h3>
+                        <div class="agent-metric">Theme alignment</div>
+                        <p>Summarizes the dominant market story, topic clusters, and whether narratives confirm the move.</p>
+                        <div class="agent-footer">
+                            <span>Strength 53%</span>
+                            <span>No strong catalyst</span>
+                        </div>
+                    </button>
+
+                    <button class="agent-card" data-agent="orderbook">
+                        <div class="agent-topline">
+                            <span class="agent-index">06</span>
+                            <span class="verdict verdict-bearish">Bearish</span>
+                        </div>
+                        <h3>Orderbook Agent</h3>
+                        <div class="agent-metric">Liquidity friction</div>
+                        <p>Maps bid-ask imbalance, support walls, resistance shelves, and immediate microstructure risk.</p>
+                        <div class="agent-footer">
+                            <span>Strength 41%</span>
+                            <span>Ask wall at 95k</span>
+                        </div>
+                    </button>
+                </div>
+            </section>
+
+            <section class="panel" id="allMarketsPanel" hidden>
+                <div class="panel-header compact">
+                    <div>
+                        <div class="eyebrow">All Markets</div>
+                        <h2>Live Pacifica market board</h2>
+                    </div>
+                    <div class="panel-note">Click any market to open the full desk. The quick signal here is a lightweight overview, not the full multi-agent verdict.</div>
+                </div>
+                <div class="agent-grid" id="allMarketsGrid"></div>
+            </section>
+
+            <section class="workspace-panel panel agent-modal" id="agentPanelModal" hidden>
+                <div class="workspace-main">
+                    <div class="workspace-left">
+                        <div class="panel-header compact">
+                            <div>
+                                <div class="eyebrow">Agent Workspace</div>
+                                <h2 id="workspaceTitle">Market Agent Desk</h2>
+                            </div>
+                            <div style="display:flex; gap:10px; align-items:center;">
+                                <div class="workspace-badge" id="workspaceVerdict">Bullish</div>
+                                <button type="button" class="toggle" id="closeAgentPanel">Close</button>
+                            </div>
+                        </div>
+
+                        <div class="workspace-story">
+                            <div class="story-card">
+                                <span class="story-label">Role</span>
+                                <p id="workspaceRole">This agent validates whether the move is structurally healthy through price, trend, and participation.</p>
+                            </div>
+                            <div class="story-card">
+                                <span class="story-label">Latest call</span>
+                                <p id="workspaceSummary">Price is trading above the 1h trend baseline with rising open interest, which keeps the structure constructive.</p>
+                            </div>
+                            <div class="story-card">
+                                <span class="story-label">Desk alignment</span>
+                                <p id="workspaceQuestions">This agent aligns with the current desk verdict and highlights what to watch next.</p>
+                            </div>
+                        </div>
+
+                        <div class="analysis-canvas">
+                            <div class="canvas-header">
+                                <div>
+                                    <div class="eyebrow">Visual Evidence</div>
+                                    <h3 id="chartTitle">Price action and structure</h3>
+                                </div>
+                                <div class="toggle-group" id="overlayToggles">
+                                    <button class="toggle active">Primary</button>
+                                    <button class="toggle">Secondary</button>
+                                    <button class="toggle">Risk</button>
+                                </div>
+                            </div>
+                            <div class="chart-wrap">
+                                <canvas id="workspaceChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <aside class="workspace-right">
+                        <div class="insight-card">
+                            <div class="insight-label">Key read</div>
+                            <div class="insight-value" id="workspaceMetric">Trend continuation</div>
+                            <p id="workspaceMetricCopy">Momentum remains constructive as buyers defend higher lows.</p>
+                        </div>
+
+                        <div class="timeline-card">
+                            <div class="insight-label">Discussion points</div>
+                            <ul class="discussion-list" id="discussionList">
+                                <li>Price reclaimed the hourly mean and held the retest.</li>
+                                <li>Open interest is climbing with the move, not fading.</li>
+                                <li>Continuation risk increases only if the prior swing low fails.</li>
+                            </ul>
+                        </div>
+
+                        <div class="timeline-card">
+                            <div class="insight-label">Current affairs</div>
+                            <ul class="signal-feed" id="signalFeed">
+                                <li>Loading current market headlines...</li>
+                            </ul>
+                        </div>
+
+                        <div class="timeline-card">
+                            <div class="insight-label">Agent chat</div>
+                            <div class="agent-chat">
+                                <div class="chat-meta">
+                                    <span id="chatAgentLabel">Market Agent</span>
+                                    <span id="chatOverallVerdict">Overall verdict: BUY</span>
+                                </div>
+                                <div class="chat-messages" id="chatMessages">
+                                    <div class="chat-message assistant">Loading the latest agent report...</div>
+                                </div>
+                                <form class="chat-form" id="agentChatForm">
+                                    <input id="agentChatInput" type="text" placeholder="Ask about verdict, proof, research, or next steps" autocomplete="off">
+                                    <button type="submit">Ask</button>
+                                </form>
+                                <div class="chat-suggestions" id="chatSuggestions"></div>
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+            </section>
+
+            <section class="evidence-panel panel">
+                <div class="panel-header compact">
+                    <div>
+                        <div class="eyebrow">Cross-Desk Evidence</div>
+                        <h2>Normal dashboard views, but tied to agent logic</h2>
+                    </div>
+                </div>
+
+                <div class="evidence-grid">
+                    <article class="evidence-card">
+                        <div class="evidence-head">
+                            <h3>Orderbook depth</h3>
+                            <span id="depthLabel">62% bid-side</span>
+                        </div>
+                        <div class="depth-stack">
+                            <div class="depth-bid" id="depthBidBar"></div>
+                            <div class="depth-ask" id="depthAskBar"></div>
+                        </div>
+                        <p id="depthCopy">Liquidity is skewed to bids, but an overhead ask shelf still needs to be cleared.</p>
+                    </article>
+
+                    <article class="evidence-card">
+                        <div class="evidence-head">
+                            <h3>Liquidation map</h3>
+                            <span id="liqLabel">Shorts dominant</span>
+                        </div>
+                        <div class="liq-stack">
+                            <div class="liq-bar short-bar" id="shortBar"></div>
+                            <div class="liq-bar long-bar" id="longBar"></div>
+                        </div>
+                        <p id="liqCopy">Recent forced short closes are providing momentum fuel for the active move.</p>
+                    </article>
+
+                </div>
+            </section>
+
+            <section class="intel-panel panel">
+                <div class="panel-header compact">
+                    <div>
+                        <div class="eyebrow">Intelligence Feed</div>
+                        <h2>What the desk is talking about now</h2>
+                    </div>
+                </div>
+                <div class="intel-grid">
+                    <article class="intel-card">
+                        <div class="intel-label">Top narratives</div>
+                        <ul id="narrativeList">
+                            <li>ETF-led strength keeps BTC bid relative to alts.</li>
+                            <li>Negative funding makes short squeeze continuation plausible.</li>
+                            <li>Perp positioning is stretched but not exhausted.</li>
+                        </ul>
+                    </article>
+                    <article class="intel-card">
+                        <div class="intel-label">Recent terminal log</div>
+                        <div class="log-feed" id="logFeed">
+                            <div><span>14:31 UTC</span> Signal engine moved to BUY after liquidation acceleration.</div>
+                            <div><span>14:28 UTC</span> Funding agent upgraded conviction on growing negative carry.</div>
+                            <div><span>14:24 UTC</span> Orderbook agent flagged ask wall near local highs.</div>
+                        </div>
+                    </article>
+                    <article class="intel-card">
+                        <div class="intel-label">Desk watchlist</div>
+                        <ul id="watchList">
+                            <li>BTC must hold above intraday support to preserve the trend read.</li>
+                            <li>ETH follow-through would strengthen the macro breadth case.</li>
+                            <li>SOL lagging would suggest leadership remains concentrated.</li>
+                        </ul>
+                    </article>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
