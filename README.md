@@ -1,4 +1,3 @@
-text
 # PacificaEdge (Pacios)
 > A multi-agent crypto research desk built on top of Pacifica's perpetual DEX.
 
@@ -8,7 +7,7 @@ Pacios turns scattered real-time Pacifica market data into a single, explainable
 
 ## What it solves
 
-Most crypto traders are drowning in raw feeds. Pacios acts like a full research team watching every market 24/7 and distilling what matters into one clear, explainable signal — with full context, backtest evidence, and a natural-language analyst you can query.
+Most crypto traders are drowning in raw feeds with no context. Pacios acts like a full research team watching every market 24/7 and distilling what matters into one clear, explainable signal — with full agent reasoning, external analytics, backtest evidence, and a natural-language analyst you can query in real time.
 
 ---
 
@@ -39,16 +38,46 @@ text
 
 ## Features
 
-- **6-agent signal engine** — each agent contributes a view (Bullish / Neutral / Bearish) before the meta signal is decided
-- **100% real Pacifica data** — no mock feeds, no placeholders; live prices, orderbook, funding, and liquidations
-- **altFINS integration** — external short/medium/long-term trends, momentum scores, conviction layer per symbol
-- **Elfa sentiment** — smart-money account scores and positioning signals
-- **Tavily-powered news** — per-symbol web search summarized into headlines and top themes (ETF inflows, regulation, macro, etc.)
-- **Backtesting + session accuracy** — every signal is backed by 30-day performance stats and intraday accuracy
-- **NeMo/Claude analyst** — full MCP-driven analyst that explains the signal in plain language and answers any market question
-- **Telegram alert system** — subscribe per symbol, choose BUY/SELL/BUY_OR_SELL trigger, get a ping when the signal flips
-- **Debug context route** — `/api/debug/context/{symbol}` exposes the full enriched context for any symbol for inspection
-- **Multi-symbol support** — BTC-USDC, ETH-USDC, SOL-USDC, BTC-PERP, and any derivable symbol; unknown symbols degrade safely
+### Core signal engine
+- **6-agent team** — each agent (market, funding, liquidation, sentiment, narrative, orderbook) contributes a Bullish/Neutral/Bearish view independently before the meta signal is decided
+- **Real Pacifica data only** — 100% live feeds from Pacifica's perp DEX, no mocks or placeholders
+- **Async parallel context builder** — all agents + external data fetched in parallel using `asyncio.gather` for minimal latency
+- **Stable signal shapes** — every route returns predictable, versioned JSON so frontend and analyst never break on missing fields
+
+### External analytics layer
+- **altFINS API** — pulls structured short/medium/long-term trends, RSI, MACD, volume score, ATR, and altFINS signal feed per symbol; includes a conviction rating (aligned / conflicted / low / unknown) that tells you whether altFINS agrees with the internal signal
+- **Elfa sentiment scores** — smart-money account activity and positioning data surfaced as a per-symbol sentiment signal
+- **Tavily-powered news** — per-symbol real-time web search summarized into top themes (ETF inflows, regulation, macro, liquidations, hack) and 2–3 latest headlines with source and timestamp
+
+### Signal quality & evaluation
+- **30-day backtest** — every symbol carries a win rate, average PnL %, and trade count from historical signal replay
+- **Session accuracy** — real-time counter of how many signals have been correct today, with the last signal direction and outcome shown on the dashboard
+- **altFINS vs internal alignment** — explicit `alignment_with_signal` field showing whether external data reinforces or conflicts with the internal decision
+
+### Analyst Q&A
+- **NeMo/Claude analyst** — MCP-powered analyst that receives the full context (all 6 agents + signal engine + altFINS + Elfa + Tavily + backtest + session accuracy) and answers any market question in plain language
+- **Model routing** — uses a fast Haiku-class model for normal questions and escalates to a Sonnet-class model only when the question is clearly complex or the answer quality is low, keeping costs minimal
+- **Safe fallback** — if external models are unavailable, the analyst returns a structured fallback message instead of crashing the route
+
+### Real-time Telegram alerts
+- **Per-symbol subscriptions** — subscribe any symbol with `BUY`, `SELL`, or `BUY_OR_SELL` trigger conditions
+- **Signal-flip detection** — backend watches for state changes and fires alerts only when a symbol transitions into the subscribed trigger state
+- **Rich alert messages** — each Telegram message includes symbol, current signal decision, altFINS view, and top news themes for full context
+- **Test endpoint** — `/apialert/test/{symbol}` lets you send an immediate test alert to verify your setup at any time
+
+### Dashboard
+- Global symbol selector across all Pacifica markets
+- Primary signal strip: price, decision, confidence, altFINS + news summary
+- 6-agent pills with individual Bullish/Neutral/Bearish + reason per agent
+- altFINS block: short/medium/long trend, conviction, signal count
+- News block: top themes as chips + latest headlines
+- Backtest + session accuracy panel
+- Claude/NeMo analyst Q&A panel
+- Telegram alerts panel with toggle, trigger selector, and "Send test alert" button
+
+### Developer / debug
+- `/api/debug/context/{symbol}` — returns the full enriched context JSON for any symbol, including all agents, signal engine, altFINS, news, backtest, and session accuracy, useful for verifying data correctness
+- Multi-symbol robustness: unknown or low-liquidity symbols degrade safely with `altfins.available = false` and `news_context.available = false` instead of crashing
 
 ---
 
@@ -64,7 +93,7 @@ text
 | News search | Tavily Search API |
 | Alerts | Telegram Bot API |
 | Market data | Pacifica REST/WS feeds |
-| Deployment | Railway |
+| Deployment | Vercel |
 
 ---
 
@@ -166,12 +195,32 @@ curl http://localhost:8000/apialert/test/BTC-USDC
 
 ---
 
-## Deployment (Railway)
+## Deployment (Vercel)
 
 1. Push the repo to GitHub.
-2. Create a new Railway service, connect your repo.
-3. In Railway → Variables, add all env vars from `.env.example`.
-4. Deploy; Railway detects Python and runs `uvicorn main:app --host 0.0.0.0 --port $PORT`.
+2. Go to [vercel.com](https://vercel.com) → New Project → import your repo.
+3. Set the **Framework Preset** to `Other`.
+4. Add a `vercel.json` at the root:
+
+```json
+{
+  "builds": [
+    {
+      "src": "main.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "main.py"
+    }
+  ]
+}
+```
+
+5. In Vercel → Settings → Environment Variables, add all env vars from `.env.example`.
+6. Deploy — Vercel will install `requirements.txt` and serve the FastAPI app.
 
 ---
 
