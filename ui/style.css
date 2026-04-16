@@ -552,7 +552,47 @@ textarea {
     gap: 14px;
 }
 
+.agent-click-banner,
+.agent-bottom-prompt {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px;
+    align-items: center;
+    border-radius: 22px;
+    padding: 14px 16px;
+}
+
+.agent-click-banner {
+    margin-bottom: 14px;
+    border: 1px solid rgba(199, 97, 83, 0.28);
+    background: linear-gradient(180deg, rgba(199, 97, 83, 0.12), rgba(199, 97, 83, 0.05));
+}
+
+.agent-click-alert {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #ff8f83;
+    font-size: 0.88rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.agent-click-alert::before {
+    content: "●";
+    font-size: 0.8rem;
+}
+
+.agent-click-banner p,
+.agent-bottom-prompt p {
+    margin-top: 6px;
+    color: var(--text-soft);
+    line-height: 1.5;
+}
+
 .agent-card {
+    position: relative;
     text-align: left;
     border-radius: 24px;
     padding: 18px;
@@ -574,6 +614,21 @@ textarea {
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+.agent-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 24px;
+    border: 1px solid transparent;
+    pointer-events: none;
+    transition: border-color 220ms ease;
+}
+
+.agent-card:hover::after,
+.agent-card.active::after {
+    border-color: rgba(255, 143, 131, 0.25);
 }
 
 .agent-index {
@@ -624,8 +679,47 @@ textarea {
 
 .agent-footer {
     margin-top: 16px;
+    flex-wrap: wrap;
+    gap: 8px;
     color: var(--text-muted);
     font-size: 0.86rem;
+}
+
+.agent-open-label {
+    margin-left: auto;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(199, 97, 83, 0.22);
+    background: rgba(199, 97, 83, 0.08);
+    color: #ff9c91;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.agent-bottom-prompt {
+    margin-top: 14px;
+    border: 1px solid rgba(255, 244, 214, 0.12);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.agent-bottom-label {
+    color: var(--cream);
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 1.05rem;
+}
+
+.agent-bottom-cta {
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(199, 97, 83, 0.26);
+    background: rgba(199, 97, 83, 0.08);
+    color: #ff9c91;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
 }
 
 .agent-modal {
@@ -1029,5 +1123,10 @@ textarea {
         left: 10px;
         bottom: 10px;
         width: auto;
+    }
+
+    .agent-click-banner,
+    .agent-bottom-prompt {
+        grid-template-columns: 1fr;
     }
 }
