@@ -127,7 +127,7 @@ class SignalNarrator:
         fallback = self._agent_chat_rescue_from_context(question, agent_chat_context)
         if not self._has_meaningful_agent_chat_context(agent_chat_context):
             return fallback
-        use_llm_chat = os.getenv("ENABLE_AGENT_LLM_CHAT", "true").strip().lower() == "true"
+        use_llm_chat = os.getenv("ENABLE_AGENT_LLM_CHAT", "false").strip().lower() == "true"
         if self.nemo_client is None or not use_llm_chat:
             return fallback
 
@@ -136,11 +136,11 @@ class SignalNarrator:
                 self._call_nemo(
                     system_prompt=self._build_dashboard_agent_system_prompt(),
                     user_prompt=self._build_dashboard_agent_user_prompt(question, agent_chat_context),
-                    max_tokens=150,
+                    max_tokens=220,
                     fallback=fallback,
-                    attempts=1,
+                    attempts=2,
                 ),
-                timeout=float(os.getenv("AGENT_LLM_TIMEOUT_SECONDS", "2.6")),
+                timeout=float(os.getenv("AGENT_LLM_TIMEOUT_SECONDS", "4.8")),
             )
         except Exception:
             logger.warning("Agent chat LLM timed out or failed; using grounded fallback")
@@ -398,7 +398,7 @@ class SignalNarrator:
         return "backtest unavailable."
 
     def _news_summary(self, news_context: Dict[str, Any]) -> str:
-        """Build a compact Tavily news summary for narration."""
+        """Build a compact current-affairs summary for narration."""
         if not isinstance(news_context, dict) or not news_context.get("available"):
             return "recent news context unavailable."
 
@@ -445,19 +445,55 @@ class SignalNarrator:
         next_step: str,
         research: str = "",
     ) -> str:
-        """Format a concise agent-chat answer into easy-to-scan lines."""
-        lines = []
-        if self._clean_text(verdict):
-            lines.append(f"- Call: {self._line_text(verdict)}")
-        if self._clean_text(why):
-            lines.append(f"- Data: {self._line_text(why)}")
-        if self._clean_text(team):
-            lines.append(f"- Team: {self._line_text(team)}")
-        if self._clean_text(research):
-            lines.append(f"- Web: {self._line_text(research)}")
+        """Format a concise agent-chat answer as structured point-form guidance."""
+        parts: list[str] = []
+        seen: set[str] = set()
+
+        def _push(label: str, text: str) -> None:
+            cleaned = self._clean_text(text)
+            if not cleaned:
+                return
+            normalized = cleaned.lower()
+            if normalized in seen:
+                return
+            seen.add(normalized)
+            parts.append(f"- {label}: {self._line_text(cleaned)}")
+
+        _push("Call", verdict)
+        _push("Why", why)
+        _push("Team", team)
+        _push("Current Affairs", research)
         if self._clean_text(next_step):
-            lines.append(f"- Next: {self._line_text(next_step)}")
-        return "\n".join(lines)
+            cleaned_next = self._clean_text(next_step)
+            if cleaned_next:
+                _push("Next", cleaned_next)
+        return "\n".join(parts[:5])
+
+    def _strip_named_prefix(self, text: str) -> str:
+        """Drop a leading '<Agent Name>:' prefix from a teammate explanation."""
+        cleaned = self._clean_text(text)
+        if ": " not in cleaned:
+            return cleaned
+        prefix, remainder = cleaned.split(": ", 1)
+        if prefix.endswith("Agent"):
+            return remainder.strip()
+        return cleaned
+
+    def _compact_team_metric_snapshot(self, team_reports: Dict[str, Any]) -> str:
+        """Build a short cross-agent metric snapshot for frontdesk data answers."""
+        metric_parts: list[str] = []
+        for agent_key in ("market", "funding", "orderbook", "liquidation", "sentiment", "narrative"):
+            report_payload = team_reports.get(agent_key, {})
+            if not isinstance(report_payload, dict):
+                continue
+            label = self._clean_text(str(report_payload.get("key_metric_label", "")))
+            value = self._clean_text(str(report_payload.get("key_metric_value", "")))
+            agent_name = self._clean_text(str(report_payload.get("agent_label", agent_key)))
+            if label and value:
+                metric_parts.append(f"{agent_name} {label.lower()} {value}")
+            if len(metric_parts) >= 3:
+                break
+        return self._join_items(metric_parts)
 
     def _extract_raw_text_value(self, raw: str) -> str | None:
         """Best-effort extraction of a text field from malformed JSON-like raw output."""
@@ -771,15 +807,17 @@ class SignalNarrator:
             "When the user asks one specialist agent a question, keep that agent's voice but still use the whole-team context. "
             "Use current affairs when available, but do not force them if coverage is thin. "
             "Do not hallucinate metrics or markets that are not present in the context. "
-            "Keep the answer concise, friendly, and professional. "
+            "Keep the answer concise, friendly, professional, and easy to read. "
             "Each field must be short, concrete, and grounded in the supplied numbers and teammate views. "
             "Tailor the answer to the user's intent: "
             "if they ask for data, focus on metrics; "
             "if they ask for team view, focus on which agents support or disagree; "
-            "if they ask for web or research, focus on Tavily/current-affairs; "
+            "if they ask for web or research, focus on live current-affairs coverage; "
             "if they ask what to do next, give the practical next move instead of repeating the market ranking. "
-            'Return exactly one JSON object with keys call, data, team, web, next_step. '
-            'Each value must be a short sentence. Use an empty string for web when there is no useful current-affairs context.'
+            'Return exactly one JSON object with one key: {"text":"..."} '
+            "Format the text as 4 or 5 short point-form lines using this shape when possible: "
+            "Call, Why, Team, optional Current Affairs, Next. "
+            "Keep every line short and understandable by a normal user."
         )
 
     def _build_dashboard_agent_user_prompt(self, question: str, agent_chat_context: Dict[str, Any]) -> str:
@@ -792,8 +830,9 @@ class SignalNarrator:
             "Answer as the selected agent using the chosen workspace, the team summaries, the market signal, and the news context. "
             "If teammates agree, say that clearly. If a teammate is the main disagreement, say that clearly too. "
             "If the user asks what to explore next, rank markets instead of giving a generic answer. "
-            "Keep this tight enough to read in one glance. "
-            'Return exactly {"call":"...","data":"...","team":"...","web":"...","next_step":"..."}'
+            "Keep this tight enough to read in one glance, but make it sound like a human analyst talking. "
+            "Use short point-form lines rather than one dense paragraph. "
+            'Return exactly {"text":"<plain text answer>"}'
         )
 
     def _analyst_rescue_from_context(self, question: str, all_markets_state: Dict[str, Any]) -> str | None:
@@ -912,12 +951,14 @@ class SignalNarrator:
         """Build a deterministic desk-style agent answer when the LLM path is unavailable."""
         mode = str(agent_chat_context.get("mode", "single_market"))
         question_lower = question.lower()
-        question_is_research = any(term in question_lower for term in ("news", "research", "tavily", "verify", "current affairs", "headline", "web"))
-        question_is_reason = any(term in question_lower for term in ("why", "proof", "reason"))
-        question_is_consensus = any(term in question_lower for term in ("agree", "disagree", "team", "multi", "agents", "other agents"))
-        question_is_risk = any(term in question_lower for term in ("risk", "watch", "danger", "invalidate", "invalid"))
-        question_is_data = any(term in question_lower for term in ("data", "metric", "metrics", "number", "numbers", "seeing", "signal value"))
-        question_is_action = any(term in question_lower for term in ("best move", "what should", "from here", "next move", "action", "do now", "move for me", "step now"))
+        question_is_research = any(term in question_lower for term in ("news", "research", "tavily", "verify", "current affairs", "headline", "web", "theme", "story", "narrative"))
+        question_is_reason = any(term in question_lower for term in ("why", "proof", "reason", "explain", "summary", "summarize"))
+        question_is_consensus = any(term in question_lower for term in ("agree", "disagree", "team", "multi", "agents", "other agents", "consensus", "confirm", "confirmation"))
+        question_is_risk = any(term in question_lower for term in ("risk", "watch", "danger", "invalidate", "invalid", "downside", "fail", "wrong"))
+        question_is_data = any(term in question_lower for term in ("data", "metric", "metrics", "number", "numbers", "seeing", "signal value", "price", "open interest", "oi", "volume", "funding", "liquidation", "imbalance"))
+        question_is_action = any(term in question_lower for term in ("best move", "what should", "from here", "next move", "action", "do now", "move for me", "step now", "buy now", "sell now", "long", "short", "enter", "exit", "trade"))
+        question_is_summary = any(term in question_lower for term in ("summary", "summarize", "simple", "plain english", "quick read"))
+        question_is_levels = any(term in question_lower for term in ("level", "levels", "wall", "support", "resistance", "book"))
 
         if mode == "all_markets":
             board = agent_chat_context.get("all_markets_board", [])
@@ -966,7 +1007,7 @@ class SignalNarrator:
                 else "Frontdesk is waiting for more board depth."
             )
             research_line = (
-                f"Tavily is flagging {headline_text}"
+                f"Live current-affairs coverage is flagging {headline_text}"
                 if headline_text
                 else "Board-wide current-affairs coverage is light right now"
             )
@@ -1033,6 +1074,16 @@ class SignalNarrator:
         report = self._clean_text(str(workspace.get("report", "")))
         metric_label = self._clean_text(str(workspace.get("key_metric_label", "key metric")))
         metric_value = self._clean_text(str(workspace.get("key_metric_value", "n/a")))
+        reasoning_details = workspace.get("reasoning_details", {})
+        if not isinstance(reasoning_details, dict):
+            reasoning_details = {}
+        local_thesis = self._clean_text(str(reasoning_details.get("thesis", "")))
+        local_risk = self._clean_text(str(reasoning_details.get("risk", "")))
+        local_evidence = [
+            self._clean_text(str(item))
+            for item in reasoning_details.get("evidence", [])
+            if self._clean_text(str(item))
+        ] if isinstance(reasoning_details.get("evidence", []), list) else []
         next_steps = workspace.get("next_steps", [])
         next_step = next_steps[0] if isinstance(next_steps, list) and next_steps else "watch the next refresh for confirmation"
         top_themes = workspace.get("top_themes", [])
@@ -1059,12 +1110,13 @@ class SignalNarrator:
                 f"with {report_payload.get('key_metric_label', 'metric')} at {report_payload.get('key_metric_value', 'n/a')}"
             )
             verdict_value = str(report_payload.get("verdict", "NEUTRAL")).upper()
-            if verdict_value in {"BUY", "BULLISH"}:
+            relation = self._classify_team_alignment(selected_verdict=verdict, teammate_verdict=verdict_value)
+            if relation == "support":
                 support_lines.append(line)
                 support_names.append(agent_name)
                 if report_text:
                     support_reasons.append(f"{agent_name}: {report_text}")
-            elif verdict_value in {"SELL", "BEARISH"}:
+            elif relation == "pushback":
                 pushback_lines.append(line)
                 pushback_names.append(agent_name)
                 if report_text:
@@ -1083,9 +1135,10 @@ class SignalNarrator:
         ] if isinstance(current_affairs, list) else []
         research_line = ""
         if verified_headlines:
-            research_line = f"Tavily is highlighting {self._join_items(verified_headlines)}"
+            research_line = f"Live current-affairs coverage is highlighting {self._join_items(verified_headlines)}"
         elif theme_text:
             research_line = f"Current market themes are {theme_text}"
+        include_research = question_is_research or question_is_reason
 
         support_name_text = self._join_items(support_names[:3]) if support_names else "the broader team"
         pushback_name_text = self._join_items(pushback_names[:2]) if pushback_names else ""
@@ -1093,110 +1146,143 @@ class SignalNarrator:
         support_reason_text = self._join_items(support_reasons[:2]) if support_reasons else ""
         pushback_reason_text = self._join_items(pushback_reasons[:2]) if pushback_reasons else ""
         neutral_reason_text = self._join_items(neutral_reasons[:2]) if neutral_reasons else ""
+        lead_support_name = support_names[0] if support_names else ""
+        lead_pushback_name = pushback_names[0] if pushback_names else ""
+        lead_support_reason = self._strip_named_prefix(support_reasons[0]) if support_reasons else ""
+        lead_pushback_reason = self._strip_named_prefix(pushback_reasons[0]) if pushback_reasons else ""
+        team_metric_snapshot = self._compact_team_metric_snapshot(team_reports)
         if agent_key == "frontdesk":
             verdict_line = f"{symbol} desk bias is {overall_verdict} with {overall_confidence:.0f}% confidence"
-            why_line = report or "The desk evidence is mixed."
             data_line = report or "The desk evidence is mixed."
-            if metric_label and metric_value:
-                data_line = f"{metric_label} is {metric_value}. {data_line}"
-            if question_is_reason:
-                data_line = (
-                    support_reason_text
-                    if support_reason_text
-                    else data_line
-                )
-                if pushback_reason_text:
-                    data_line = f"{data_line} Main counterweight: {pushback_reason_text}"
+            team_line = (
+                f"Lead support comes from {support_name_text}; main pushback is {pushback_name_text}."
+                if pushback_name_text
+                else f"Lead support comes from {support_name_text}; the rest of the desk is mostly neutral."
+            )
+            if question_is_reason or question_is_summary:
+                if overall_verdict == "HOLD":
+                    verdict_line = f"{symbol} is HOLD because the desk is mixed and no side has clean conviction."
+                    data_line = (
+                        lead_pushback_reason
+                        or lead_support_reason
+                        or report
+                        or "The setup is directionally mixed."
+                    )
+                    team_line = (
+                        f"The strongest push is {lead_support_name or 'limited support'}, but {lead_pushback_name or 'the rest of the desk'} keeps the call neutral."
+                    )
+                else:
+                    verdict_line = (
+                        f"{symbol} is {overall_verdict} because {lead_support_name or 'support is limited'} is driving the call."
+                    )
+                    data_line = lead_support_reason or report or "The setup is directionally mixed."
+                    if lead_pushback_reason:
+                        team_line = f"{lead_pushback_name} is the main drag because {lead_pushback_reason}"
             elif question_is_consensus:
+                verdict_line = f"The desk is not fully aligned on {symbol}."
                 data_line = (
-                    f"Support is present, but confidence stays at {overall_confidence:.0f}% because the desk is not in full alignment"
+                    f"Support comes from {support_name_text or 'limited support'}."
+                )
+                team_line = (
+                    f"Pushback comes from {pushback_name_text or 'no strong bear case'}, while {neutral_name_text or 'the rest'} stay neutral."
                 )
             elif question_is_risk:
-                data_line = f"{report or data_line} Main risk is {pushback_reason_text or neutral_reason_text or 'the still-neutral parts of the desk'}"
+                verdict_line = f"The main risk on {symbol} is {lead_pushback_name or 'low team alignment'}."
+                data_line = lead_pushback_reason or neutral_reason_text or "Conviction is still thin across the desk."
+                team_line = f"Desk confidence is only {overall_confidence:.0f}%, so this is not a clean one-way setup."
             elif question_is_data:
-                data_line = (
-                    f"Desk score is {market_signal.get('score', 0)}/6 with {overall_confidence:.0f}% confidence. "
-                    f"Strongest confirming notes: {support_reason_text or support_name_text}."
+                verdict_line = f"{symbol} desk score is {self._to_float(market_signal.get('score')):.2f} with {overall_confidence:.0f}% confidence."
+                data_line = team_metric_snapshot or f"{metric_label} is {metric_value}."
+                team_line = (
+                    f"{lead_support_name or 'No clear leader'} is doing most of the work, while {lead_pushback_name or 'the rest of the desk'} is the main offset."
                 )
-            team_line = (
-                f"Agreement is led by {support_name_text}; main pushback is {pushback_name_text}."
-                if pushback_name_text
-                else f"Agreement is led by {support_name_text}; the rest of the desk is mostly neutral."
-            )
-            if question_is_consensus and neutral_name_text:
-                team_line = f"{team_line} Neutral seats are {neutral_name_text}."
-            if question_is_consensus and pushback_reason_text:
-                team_line = f"{team_line} Pushback detail: {pushback_reason_text}"
+            elif question_is_research:
+                verdict_line = f"Current research matters, but the {symbol} call is still mostly data-driven."
+                data_line = research_line or "Current-affairs coverage is light, so the desk is leaning on live market structure."
+                team_line = (
+                    f"Desk support is led by {support_name_text or 'limited support'} with {pushback_name_text or 'no strong pushback'} as the offset."
+                )
+            elif question_is_action:
+                verdict_line = (
+                    f"Treat {symbol} as a watchlist {overall_verdict.lower()} bias, not a strong entry yet."
+                    if overall_verdict == "HOLD" or overall_confidence < 34
+                    else f"You can lean {overall_verdict.lower()} on {symbol}, but only with confirmation from the lead agents."
+                )
+                data_line = f"Lead support is {support_name_text or 'limited'}, and confidence is {overall_confidence:.0f}%."
+                team_line = f"The main thing to watch is {lead_pushback_name or 'whether more agents join the move'}."
             if question_is_research and not research_line:
                 research_line = "No strong current-affairs catalyst is dominating the tape right now"
-            if question_is_action:
-                verdict_line = (
-                    f"Best move is to stay patient on {symbol} until the desk gets stronger confirmation"
-                    if overall_verdict == "HOLD" or overall_confidence < 34
-                    else f"Best move is to follow the {overall_verdict} bias, but only with confirmation from the lead agents"
-                )
-                data_line = (
-                    f"Lead support is {support_name_text}. Current desk confidence is {overall_confidence:.0f}%."
-                )
             return self._format_agent_chat_answer(
                 verdict=verdict_line,
                 why=data_line,
                 team=team_line,
-                research=research_line,
+                research=research_line if include_research else "",
                 next_step=next_step,
             )
 
-        why_parts = [self._clean_text(f"{metric_label} is {metric_value}")]
-        if report:
-            why_parts.append(self._clean_text(report))
-        if question_is_reason and support_reason_text:
-            why_parts.append(self._clean_text(f"Main confirmation: {support_reason_text}"))
-        if question_is_risk and pushback_reason_text:
-            why_parts.append(self._clean_text(f"Main risk: {pushback_reason_text}"))
-        if question_is_data:
-            why_parts = [
-                self._clean_text(f"{metric_label} is {metric_value}"),
-                self._clean_text(report or "No extra agent report available."),
-            ]
-        why_line = " ".join(self._line_text(part) for part in why_parts if self._clean_text(part))
-        team_line = (
-            f"Desk agrees through {support_name_text}; main pushback is {pushback_name_text or 'limited'}."
-            if support_names
-            else f"The broader desk is mostly neutral; the clearest counterweight is {pushback_name_text or neutral_name_text or 'limited'}."
+        metric_sentence = self._clean_text(f"{metric_label} is {metric_value}")
+        why_line = local_thesis or report or metric_sentence
+        data_gap = any(
+            term in why_line.lower()
+            for term in ("unavailable", "insufficient", "not available", "no trustworthy")
         )
-        if question_is_consensus and support_reason_text:
-            team_line = f"{team_line} Strongest confirmation: {support_reason_text}"
-        if question_is_consensus and pushback_reason_text:
-            team_line = f"{team_line} Main disagreement: {pushback_reason_text}"
-        if question_is_research:
-            why_line = report or why_line
+        team_line = (
+            f"Support comes from {support_name_text}; main disagreement is {pushback_name_text or 'limited'}."
+            if support_names
+            else f"No strong teammate is backing this read yet; main counterweight is {pushback_name_text or neutral_name_text or 'limited'}."
+        )
+        verdict_line = f"{agent_label} is {verdict}; full desk is {overall_verdict} with {overall_confidence:.0f}% confidence"
+        if question_is_reason or question_is_summary:
+            verdict_line = f"{agent_label} is {verdict} on {symbol}."
+            why_line = local_thesis or report or metric_sentence
+            if local_evidence and not data_gap:
+                why_line = f"{why_line} Key evidence is {self._join_items(local_evidence[:2])}"
+            team_line = (
+                f"{lead_support_name or 'No strong teammate'} confirms this read, while {lead_pushback_name or 'the rest of the desk'} is the main offset."
+            )
+        elif question_is_data:
+            verdict_line = f"{agent_label} data on {symbol} is straightforward."
+            why_line = why_line if data_gap else metric_sentence
+            if local_evidence and not data_gap:
+                why_line = f"{metric_sentence}. Key evidence is {self._join_items(local_evidence[:3])}"
+            team_line = (
+                f"This lines up best with {lead_support_name or 'limited support'} and clashes most with {lead_pushback_name or 'no major pushback'}."
+            )
+        elif question_is_risk:
+            verdict_line = f"The main risk in the {agent_label.lower()} read is {lead_pushback_name or 'low conviction'}."
+            why_line = local_risk or lead_pushback_reason or "This agent does not have strong standalone edge right now."
+            team_line = f"Desk pushback is coming from {pushback_name_text or neutral_name_text or 'the rest of the desk'}."
+        elif question_is_consensus:
+            verdict_line = f"{agent_label} is not operating in isolation on {symbol}."
+            why_line = f"Support comes from {support_name_text or 'limited support'}."
+            team_line = f"Main disagreement comes from {pushback_name_text or 'no strong pushback'}, with {neutral_name_text or 'the rest'} mostly neutral."
+        elif question_is_research:
+            verdict_line = f"{agent_label} is still mainly using live market context on {symbol}."
+            why_line = research_line or "Current-affairs coverage is light, so this read is being driven by local market data."
             team_line = (
                 f"My read lines up best with {support_name_text or 'the broader desk'} while {pushback_name_text or 'the rest stays balanced'} is the main offset."
             )
-        if question_is_research and not research_line:
-            research_line = "Current-affairs coverage is light, so this read is mainly coming from live market data"
-        if not research_line and theme_text:
-            research_line = f"Key live themes are {theme_text}"
-        verdict_line = f"{agent_label} is {verdict}; full desk is {overall_verdict} with {overall_confidence:.0f}% confidence"
-        if question_is_action:
+        elif question_is_levels and agent_key == "orderbook":
+            verdict_line = f"Orderbook levels on {symbol} are not strongly one-sided right now."
+            why_line = local_thesis or report or metric_sentence
+            if local_evidence and not data_gap:
+                why_line = f"{why_line} Key book evidence is {self._join_items(local_evidence[:2])}"
+            team_line = f"The book read is mostly a confirmation layer while {lead_pushback_name or 'the broader desk'} sets the bigger tone."
+        elif question_is_action:
             verdict_line = (
                 f"Do not trade on {agent_label} alone; use it as a confirmation layer for the desk."
                 if overall_verdict == "HOLD" or overall_confidence < 34
                 else f"Use {agent_label} as a confirming agent for the desk's {overall_verdict} bias."
             )
-            why_line = " ".join(
-                self._line_text(part)
-                for part in (
-                    self._clean_text(f"{metric_label} is {metric_value}"),
-                    self._clean_text(report or "This is the main evidence from this agent."),
-                )
-                if part
-            )
+            why_line = f"{metric_sentence}. {local_thesis or report or 'This is the main evidence from this agent.'}"
+            team_line = f"{lead_support_name or 'No strong teammate'} is the best cross-check, while {lead_pushback_name or 'the rest of the desk'} is the main offset."
+        elif not research_line and theme_text:
+            research_line = f"Key live themes are {theme_text}"
         return self._format_agent_chat_answer(
             verdict=verdict_line,
             why=why_line,
             team=team_line,
-            research=research_line,
+            research=research_line if include_research else "",
             next_step=next_step,
         )
 
@@ -1299,6 +1385,35 @@ class SignalNarrator:
             if token and token in lowered
         )
         return keyword_hits >= 1
+
+    def _classify_team_alignment(self, selected_verdict: str, teammate_verdict: str) -> str:
+        """Classify whether a teammate supports, pushes back on, or is neutral to the selected agent."""
+        selected = selected_verdict.upper()
+        teammate = teammate_verdict.upper()
+        bullish_values = {"BUY", "BULLISH"}
+        bearish_values = {"SELL", "BEARISH"}
+        neutral_values = {"HOLD", "NEUTRAL", "SCAN"}
+
+        if selected in bullish_values:
+            if teammate in bullish_values:
+                return "support"
+            if teammate in bearish_values:
+                return "pushback"
+            return "neutral"
+
+        if selected in bearish_values:
+            if teammate in bearish_values:
+                return "support"
+            if teammate in bullish_values:
+                return "pushback"
+            return "neutral"
+
+        if selected in neutral_values:
+            if teammate in neutral_values:
+                return "support"
+            return "pushback"
+
+        return "neutral"
 
     def _format_compact_currency(self, value: Any) -> str:
         """Format a numeric value into a compact currency string."""

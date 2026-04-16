@@ -11,12 +11,19 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def _clean_secret(value: str | None) -> str:
+    """Normalize env-provided secrets so stray quotes or CRLF do not break headers."""
+    if not isinstance(value, str):
+        return ""
+    return value.strip().strip("\"'").replace("\r", "").replace("\n", "").strip()
+
+
 class ElfaClient:
     """Async client for the Elfa AI API."""
 
     def __init__(self, api_key: str | None = None, timeout: float = 5.0) -> None:
         """Initialize the Elfa AI client."""
-        resolved_api_key = api_key or os.getenv("ELFA_API_KEY")
+        resolved_api_key = _clean_secret(api_key or os.getenv("ELFA_API_KEY"))
         if not resolved_api_key:
             raise ValueError("ELFA_API_KEY is not set")
         self.api_key = resolved_api_key

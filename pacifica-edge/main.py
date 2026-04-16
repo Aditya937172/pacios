@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 
+from agents.current_agent import CurrentAgent
 from agents.funding_agent import FundingAgent
 from agents.liquidation_agent import LiquidationAgent
 from agents.market_agent import MarketAgent
@@ -42,7 +43,6 @@ from services.telegram_alerts import (
     get_default_telegram_chat_id,
     send_telegram_signal_alert,
 )
-from services.tavily_news import fetch_news_context
 
 ROOT_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(ROOT_ENV_PATH)
@@ -71,11 +71,11 @@ APP_START_TIME = time.time()
 alert_subscriptions: list[dict[str, Any]] = []
 last_signal_state: dict[str, str] = {}
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
-CACHE_TTL_SIGNAL_SECONDS: Final[float] = 3600.0
-CACHE_TTL_SIGNAL_DEGRADED_SECONDS: Final[float] = 300.0
-CACHE_TTL_DASHBOARD_SECONDS: Final[float] = 3600.0
-CACHE_TTL_CHART_SECONDS: Final[float] = 3600.0
-CACHE_TTL_OVERVIEW_SECONDS: Final[float] = 3600.0
+CACHE_TTL_SIGNAL_SECONDS: Final[float] = 20.0
+CACHE_TTL_SIGNAL_DEGRADED_SECONDS: Final[float] = 8.0
+CACHE_TTL_DASHBOARD_SECONDS: Final[float] = 20.0
+CACHE_TTL_CHART_SECONDS: Final[float] = 60.0
+CACHE_TTL_OVERVIEW_SECONDS: Final[float] = 20.0
 dashboard_cache: dict[str, tuple[float, Any]] = {}
 dashboard_inflight: dict[str, asyncio.Task[Any]] = {}
 last_good_dashboard_markets: dict[str, dict[str, Any]] = {}
@@ -120,6 +120,7 @@ except ValueError as exc:
     altfins_client = None
 sentiment_agent = SentimentAgent(elfa_client=elfa_client)
 narrative_agent = NarrativeAgent(elfa_client=elfa_client, nemo_client=nemo_client)
+current_agent = CurrentAgent(nemo_client=nemo_client)
 signal_agent = SignalAgent(
     market_agent=market_agent,
     funding_agent=funding_agent,
@@ -136,7 +137,11 @@ accuracy_tracker = AccuracyTracker(pacifica_client=pacifica_client)
 @app.on_event("startup")
 async def warm_dashboard_on_startup() -> None:
     """Kick off a background cache warm-up for the dashboard routes."""
-    should_prewarm = os.getenv("PREWARM_DASHBOARD", "true").strip().lower() != "false"
+    prewarm_flag = os.getenv("PREWARM_DASHBOARD")
+    if prewarm_flag is None:
+        should_prewarm = os.getenv("VERCEL", "").strip().lower() not in {"1", "true"}
+    else:
+        should_prewarm = prewarm_flag.strip().lower() != "false"
     if should_prewarm:
         asyncio.create_task(prewarm_dashboard_cache())
     else:
@@ -421,12 +426,12 @@ async def build_enriched_signal_result_uncached(symbol: str) -> dict[str, Any]:
     backtest_task = asyncio.create_task(
         backtest_engine.backtest_current_pattern(symbol, current_signal=signal_result)
     )
-    news_task = asyncio.create_task(fetch_news_context(symbol, narrative_summary))
+    news_task = asyncio.create_task(current_agent.run(symbol, narrative_summary, fast=True))
 
     backtest_result, altfins_result, news_context = await asyncio.gather(
-        asyncio.wait_for(backtest_task, timeout=8.0),
-        asyncio.wait_for(altfins_task, timeout=6.0),
-        asyncio.wait_for(news_task, timeout=6.0),
+        asyncio.wait_for(backtest_task, timeout=5.0),
+        asyncio.wait_for(altfins_task, timeout=2.5),
+        asyncio.wait_for(news_task, timeout=3.5),
         return_exceptions=True,
     )
     if isinstance(backtest_result, Exception):
@@ -494,12 +499,6 @@ async def build_enriched_signal_result(symbol: str) -> dict[str, Any]:
         if not signal_payload_is_degraded(first_pass):
             return first_pass
 
-        previous_payload = last_good_dashboard_markets.get(normalized_symbol)
-        previous_signal = previous_payload.get("signal", {}) if isinstance(previous_payload, dict) else {}
-        if isinstance(previous_signal, dict) and not signal_payload_is_degraded(previous_signal):
-            logger.warning("Reusing stronger last-good signal payload for %s", normalized_symbol)
-            return previous_signal
-
         logger.warning("Signal payload degraded for %s; retrying once", normalized_symbol)
         await asyncio.sleep(0.1)
         second_pass = await build_enriched_signal_result_uncached(normalized_symbol)
@@ -523,13 +522,13 @@ async def build_cached_news_context(
     symbol: str,
     narrative_summary: str | None = None,
 ) -> dict[str, Any]:
-    """Return a cached Tavily news block for ad-hoc dashboard chat use."""
+    """Return a cached current-affairs block for ad-hoc dashboard chat use."""
     normalized_symbol = normalize_symbol(symbol)
     narrative_key = (narrative_summary or "").strip().lower()[:40]
     return await get_or_build_cached(
         cache_key=f"news:{normalized_symbol}:{narrative_key}",
-        ttl_seconds=CACHE_TTL_CHART_SECONDS,
-        builder=lambda: fetch_news_context(normalized_symbol, narrative_summary),
+        ttl_seconds=CACHE_TTL_OVERVIEW_SECONDS,
+        builder=lambda: current_agent.run(normalized_symbol, narrative_summary, fast=True),
     )
 
 
@@ -619,15 +618,6 @@ def signal_payload_is_degraded(signal_payload: dict[str, Any]) -> bool:
         return True
     agents = signal_payload.get("agents", {})
     market_payload = agents.get("market", {}) if isinstance(agents, dict) else {}
-    agent_error_count = (
-        sum(
-            1
-            for agent_payload in agents.values()
-            if isinstance(agent_payload, dict) and agent_payload.get("error")
-        )
-        if isinstance(agents, dict)
-        else 0
-    )
     price = safe_float(market_payload.get("price"))
     open_interest = safe_float(market_payload.get("open_interest"))
     volume_24h = safe_float(market_payload.get("volume_24h"))
@@ -636,7 +626,6 @@ def signal_payload_is_degraded(signal_payload: dict[str, Any]) -> bool:
     return (
         has_market_error
         or has_signal_error
-        or agent_error_count >= 2
         or (price <= 0 and open_interest <= 0 and volume_24h <= 0)
     )
 
@@ -793,6 +782,147 @@ def build_agent_report_text(agent_key: str, agent_payload: dict[str, Any]) -> st
     )
 
 
+def build_agent_reasoning_details(agent_key: str, agent_payload: dict[str, Any]) -> dict[str, Any]:
+    """Return agent-specific reasoning details for dashboard chat and debugging."""
+    verdict = extract_agent_verdict(agent_key, agent_payload).upper()
+    reason = str(agent_payload.get("reason") or "").strip()
+
+    if agent_key == "market":
+        price = format_price(agent_payload.get("price"))
+        change_24h = format_percent(agent_payload.get("change_24h"), 2)
+        open_interest = format_compact_number(agent_payload.get("open_interest"))
+        thesis = (
+            f"Market structure is {verdict.lower()} because price is {price}, the 24h move is {change_24h}, "
+            f"and open interest is {open_interest}."
+            if verdict in {"BULLISH", "BEARISH"}
+            else f"Market structure is neutral because price is {price}, the 24h move is {change_24h}, and open interest is {open_interest}."
+        )
+        risk = (
+            "If price loses the current level or open interest stops confirming, this trend read weakens."
+            if verdict in {"BULLISH", "BEARISH"}
+            else "Without stronger price expansion and cleaner participation, this agent stays neutral."
+        )
+        return {
+            "thesis": thesis,
+            "risk": risk,
+            "evidence": [
+                f"Price: {price}",
+                f"24h change: {change_24h}",
+                f"Open interest: {open_interest}",
+                f"Trend: {agent_payload.get('trend', 'NEUTRAL')}",
+            ],
+        }
+
+    if agent_key == "funding":
+        funding_rate = float(agent_payload.get("funding_rate", 0.0) or 0.0)
+        annualized = format_percent(agent_payload.get("annualized_rate_pct"), 2)
+        next_rate = float(agent_payload.get("next_funding_rate", 0.0) or 0.0)
+        thesis = reason or f"Funding reads {verdict.lower()} at {annualized} annualized."
+        risk = (
+            "If funding mean-reverts quickly, the crowding signal disappears."
+            if abs(funding_rate) > 0
+            else "Funding is near flat, so this agent has weak edge until crowding appears."
+        )
+        return {
+            "thesis": thesis,
+            "risk": risk,
+            "evidence": [
+                f"Funding rate: {funding_rate:.6f}",
+                f"Annualized APY: {annualized}",
+                f"Next funding rate: {next_rate:.6f}",
+                f"Data source: {agent_payload.get('data_source', 'unknown')}",
+            ],
+        }
+
+    if agent_key == "liquidation":
+        total_liq = format_compact_number(agent_payload.get("total_liquidations_usd"))
+        long_liq = format_compact_number(agent_payload.get("long_liquidations_usd"))
+        short_liq = format_compact_number(agent_payload.get("short_liquidations_usd"))
+        dominant_side = str(agent_payload.get("dominant_side", "BALANCED"))
+        thesis = reason or f"Liquidation flow is {verdict.lower()} with {dominant_side.lower()} dominating."
+        risk = (
+            "If fresh forced-flow prints do not arrive, this remains weak confirmation only."
+            if dominant_side == "BALANCED" or total_liq == "$0.00"
+            else "Liquidation pressure can reverse fast, so this read needs a fresh follow-through print."
+        )
+        return {
+            "thesis": thesis,
+            "risk": risk,
+            "evidence": [
+                f"Total liquidations: {total_liq}",
+                f"Long liquidations: {long_liq}",
+                f"Short liquidations: {short_liq}",
+                f"Dominant side: {dominant_side}",
+            ],
+        }
+
+    if agent_key == "sentiment":
+        score = format_percent(agent_payload.get("sentiment_score"), 1)
+        mentions = int(agent_payload.get("mention_count_24h", 0) or 0)
+        rank = agent_payload.get("rank_in_trending")
+        thesis = reason or f"Social attention reads {verdict.lower()} with sentiment score at {score}."
+        risk = (
+            "Social coverage is thin, so this agent has low conviction until attention broadens."
+            if "insufficient" in reason.lower() or mentions == 0
+            else "If the token drops out of the trending set, this sentiment read weakens quickly."
+        )
+        return {
+            "thesis": thesis,
+            "risk": risk,
+            "evidence": [
+                f"Sentiment score: {score}",
+                f"24h mentions: {mentions:,}",
+                f"Trending rank: #{rank}" if rank is not None else "Trending rank: not ranked",
+                f"Source: {agent_payload.get('powered_by', 'Elfa AI')}",
+            ],
+        }
+
+    if agent_key == "narrative":
+        confidence = str(agent_payload.get("confidence", "LOW")).title()
+        bullish_hits = int(agent_payload.get("bullish_hits", 0) or 0)
+        bearish_hits = int(agent_payload.get("bearish_hits", 0) or 0)
+        summary = str(agent_payload.get("narrative_summary") or "No narrative summary available.").strip()
+        thesis = reason or summary
+        risk = (
+            "Narrative coverage is thin, so this should stay a confirmation layer instead of the lead signal."
+            if "insufficient" in thesis.lower() or confidence.lower() == "low"
+            else "Narratives shift quickly; if the current catalyst fades, this edge disappears fast."
+        )
+        return {
+            "thesis": thesis,
+            "risk": risk,
+            "evidence": [
+                f"Confidence: {confidence}",
+                f"Bullish narrative hits: {bullish_hits}",
+                f"Bearish narrative hits: {bearish_hits}",
+                f"Summary: {summary}",
+            ],
+        }
+
+    imbalance = format_percent(float(agent_payload.get("imbalance_ratio", 0.0) or 0.0) * 100.0, 1)
+    bid_total = format_compact_number(agent_payload.get("bid_total_usd"))
+    ask_total = format_compact_number(agent_payload.get("ask_total_usd"))
+    wall_alert = str(agent_payload.get("wall_alert") or "No one-sided wall alert.").strip()
+    thesis = reason or f"Orderbook is {verdict.lower()} with bid imbalance at {imbalance}."
+    if "unavailable" in thesis.lower():
+        thesis = "The live orderbook snapshot is unavailable right now, so there are no trustworthy levels to call out."
+    risk = (
+        "If the strongest wall gets absorbed or imbalance collapses, this signal can reverse quickly."
+        if verdict in {"BULLISH", "BEARISH"}
+        else "The book is balanced enough that microstructure is not giving a clean edge yet."
+    )
+    return {
+        "thesis": thesis,
+        "risk": risk,
+        "evidence": [
+            f"Bid imbalance: {imbalance}",
+            f"Bid depth: {bid_total}",
+            f"Ask depth: {ask_total}",
+            f"Wall alert: {wall_alert}",
+        ],
+    }
+
+
 def build_agent_next_steps(agent_key: str, signal_payload: dict[str, Any]) -> list[str]:
     """Build concise next-step guidance for the selected agent."""
     agent_payload = signal_payload.get("agents", {}).get(agent_key, {})
@@ -812,14 +942,43 @@ def build_agent_next_steps(agent_key: str, signal_payload: dict[str, Any]) -> li
             "If new forced flows do not appear, treat this agent as supporting context only.",
         ]
     if agent_key == "sentiment":
+        powered_by = str(agent_payload.get("powered_by") or "Elfa AI")
+        reason = str(agent_payload.get("reason") or "")
+        if "insufficient" in reason.lower():
+            return [
+                "Wait for stronger social coverage before treating this agent as important.",
+                "Use price, funding, and orderbook first until live attention data improves.",
+            ]
+        if "Current-affairs" in powered_by:
+            return [
+                "Watch whether fresh headlines keep building around this token.",
+                "If the headline flow fades, treat this sentiment read as weak confirmation only.",
+            ]
         return [
             "Watch whether the token stays near the top of Elfa trending rankings.",
             "Confirm that mention strength remains elevated rather than rolling over after the current burst.",
         ]
     if agent_key == "narrative":
+        powered_by = str(agent_payload.get("powered_by") or "")
+        reason = str(agent_payload.get("reason") or "")
+        if "insufficient" in reason.lower():
+            return [
+                "Wait for a clearer catalyst before leaning on narrative as a driver.",
+                "Use narrative as a secondary check until fresh story flow appears.",
+            ]
+        if "Current-affairs" in powered_by:
+            return [
+                "Watch whether the headline theme stays consistent on the next refresh.",
+                "If the story flow turns mixed, keep narrative as a secondary check instead of the lead driver.",
+            ]
         return [
             "Watch whether a clearer catalyst emerges from the current headlines and themes.",
             "If the story stays broad and generic, keep narrative as confirmation rather than primary signal.",
+        ]
+    if agent_key == "orderbook" and "unavailable" in str(agent_payload.get("reason", "")).lower():
+        return [
+            "Wait for the next live orderbook refresh before using levels from this agent.",
+            "Do not trade off book levels until fresh depth and wall data return.",
         ]
     return [
         "Monitor whether the strongest wall is being absorbed or remains a hard rejection zone.",
@@ -917,12 +1076,12 @@ def build_agent_workspace_payload(
         theme_text = ", ".join(str(theme) for theme in themes[:3] if isinstance(theme, str))
         if normalized_agent == "sentiment" and "Insufficient social data" in reason:
             reason = (
-                f"Elfa social coverage is thin, so the live attention cross-check is coming from Tavily. "
+                f"Elfa social coverage is thin, so the live attention cross-check is coming from current-affairs web search. "
                 f"The strongest current-affairs headline is {lead_title or 'not available'}, with themes {theme_text or 'market context'}."
             )
         elif normalized_agent == "narrative" and "Insufficient data" in reason:
             reason = (
-                f"Narrative is being cross-checked through Tavily because Elfa/NeMo context is thin. "
+                f"Narrative is being cross-checked through current-affairs web search because Elfa/NeMo context is thin. "
                 f"The leading story is {lead_title or 'not available'}, with themes {theme_text or 'market context'}."
             )
     supporting_specialists = [
@@ -941,6 +1100,7 @@ def build_agent_workspace_payload(
         f"{AGENT_LABELS[normalized_agent]} is currently {verdict}. "
         f"The overall desk verdict on {symbol} is {final_signal} with {confidence_pct:.0f}% confidence.{support_text}"
     )
+    reasoning_details = build_agent_reasoning_details(normalized_agent, agent_payload)
     return {
         "symbol": symbol,
         "agent": normalized_agent,
@@ -956,6 +1116,7 @@ def build_agent_workspace_payload(
         "current_affairs": current_affairs[:3],
         "top_themes": news_context.get("top_themes", []) if isinstance(news_context, dict) else [],
         "suggested_questions": build_agent_suggested_questions(normalized_agent, symbol),
+        "reasoning_details": reasoning_details,
         "raw_agent_payload": agent_payload,
     }
 
@@ -1132,7 +1293,7 @@ def build_all_markets_frontdesk_workspace(all_markets_board: list[dict[str, Any]
 
 
 def merge_news_contexts(news_contexts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-    """Merge multiple Tavily news blocks into one deduplicated headline and theme set."""
+    """Merge multiple current-affairs blocks into one deduplicated headline and theme set."""
     merged_headlines: list[dict[str, Any]] = []
     seen_titles: set[str] = set()
     merged_themes: list[str] = []
@@ -1274,6 +1435,7 @@ def build_dashboard_agent_chat_context(
             "next_steps": workspace.get("next_steps", [])[:3],
             "current_affairs": workspace.get("current_affairs", [])[:3],
             "top_themes": workspace.get("top_themes", [])[:4],
+            "reasoning_details": workspace.get("reasoning_details", {}),
         },
         "team_reports": team_reports,
         "market_signal": {
@@ -1381,6 +1543,60 @@ def build_minimal_dashboard_market_payload(symbol: str) -> dict[str, object]:
     }
 
 
+async def build_fast_agent_chat_market_payload(symbol: str) -> dict[str, object]:
+    """Build a lighter signal payload for agent chat when the full dashboard payload is not cached."""
+    normalized_symbol = normalize_symbol(symbol)
+    cached_signal = get_cached_value(f"signal:{normalized_symbol}")
+    if isinstance(cached_signal, dict) and not signal_payload_is_degraded(cached_signal):
+        signal_payload = dict(cached_signal)
+    else:
+        signal_payload = dict(await signal_agent.analyze(normalized_symbol))
+        signal_payload = await repair_signal_payload_from_prices(normalized_symbol, signal_payload)
+        signal_payload["session_accuracy"] = accuracy_tracker.get_stats()
+        signal_payload["backtest"] = {
+            "pattern_matches": 0,
+            "correct_predictions": 0,
+            "accuracy_pct": 0.0,
+            "avg_move_pct": 0.0,
+            "backtest_label": "Fast chat mode is using live desk data without a full historical backtest refresh.",
+        }
+        signal_payload["altfins"] = build_altfins_derived_view(
+            normalized_symbol,
+            signal_payload,
+            reason="fast chat path",
+        )
+        narrative_summary = (
+            signal_payload.get("agents", {})
+            .get("narrative", {})
+            .get("narrative_summary")
+        )
+        news_context = await build_cached_news_context(normalized_symbol, narrative_summary)
+        signal_payload["news_context"] = news_context if isinstance(news_context, dict) else {
+            "available": False,
+            "symbol": normalized_symbol.split("-")[0].upper(),
+            "headlines": [],
+            "top_themes": [],
+        }
+        signal_payload["analysis_context"] = format_analysis_context(
+            signal_result=signal_payload,
+            backtest=signal_payload["backtest"],
+            session_accuracy=signal_payload["session_accuracy"],
+            altfins=signal_payload["altfins"],
+            news_context=signal_payload["news_context"],
+        )
+
+    reports = {
+        agent_key: build_agent_workspace_payload(normalized_symbol, agent_key, signal_payload)
+        for agent_key in AGENT_LABELS
+    }
+    return {
+        "symbol": normalized_symbol,
+        "signal": signal_payload,
+        "reports": reports,
+        "team_summary": build_dashboard_market_summary(signal_payload),
+    }
+
+
 def dashboard_market_payload_is_degraded(payload: dict[str, Any]) -> bool:
     """Return whether a cached dashboard market payload should be treated as degraded."""
     if not isinstance(payload, dict):
@@ -1418,28 +1634,13 @@ def choose_best_dashboard_market_payload(
     symbol: str,
     current_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """Prefer the stronger last-known-good market payload when the new one is materially weaker."""
+    """Always prefer the current payload so old dashboard states do not leak back in."""
     normalized_symbol = normalize_symbol(symbol)
-    previous_payload = last_good_dashboard_markets.get(normalized_symbol)
-    if not isinstance(previous_payload, dict):
-        if not dashboard_market_payload_is_degraded(current_payload):
-            last_good_dashboard_markets[normalized_symbol] = current_payload
-        return current_payload
-
-    current_quality = dashboard_market_payload_quality(current_payload)
-    previous_quality = dashboard_market_payload_quality(previous_payload)
-    if current_quality >= previous_quality:
-        if not dashboard_market_payload_is_degraded(current_payload):
-            last_good_dashboard_markets[normalized_symbol] = current_payload
-        return current_payload
-
-    logger.warning(
-        "Reusing stronger last-good dashboard payload for %s (%s over %s)",
-        normalized_symbol,
-        previous_quality,
-        current_quality,
-    )
-    return previous_payload
+    if not dashboard_market_payload_is_degraded(current_payload):
+        last_good_dashboard_markets[normalized_symbol] = current_payload
+    else:
+        last_good_dashboard_markets.pop(normalized_symbol, None)
+    return current_payload
 
 
 async def build_all_markets_board(limit: int = 18) -> list[dict[str, Any]]:
@@ -1552,7 +1753,11 @@ async def build_dashboard_market_payload(symbol: str) -> dict[str, object]:
         signal_payload = dict(signal_payload)
         narration_task = asyncio.create_task(build_cached_narration(normalized_symbol, signal_payload))
         signal_payload["narration"] = await narration_task
-        chart_payload = await chart_task
+        try:
+            chart_payload = await asyncio.wait_for(chart_task, timeout=6.0)
+        except Exception as exc:
+            logger.warning("Chart payload degraded for %s: %s", normalized_symbol, exc)
+            chart_payload = {"symbol": normalized_symbol, "interval": "1h", "data": []}
         reports = {
             agent_key: build_agent_workspace_payload(normalized_symbol, agent_key, signal_payload)
             for agent_key in AGENT_LABELS
@@ -1611,16 +1816,7 @@ async def build_dashboard_overview_payload() -> dict[str, object]:
         for symbol, signal_payload in markets.items():
             if not isinstance(signal_payload, dict):
                 continue
-            current_summary = build_dashboard_market_summary(signal_payload)
-            previous_payload = last_good_dashboard_markets.get(symbol)
-            if isinstance(previous_payload, dict):
-                previous_summary = previous_payload.get("team_summary", {})
-                if isinstance(previous_summary, dict):
-                    current_quality = dashboard_market_payload_quality({"signal": signal_payload})
-                    previous_quality = dashboard_market_payload_quality(previous_payload)
-                    summary_cards.append(previous_summary if previous_quality > current_quality else current_summary)
-                    continue
-            summary_cards.append(current_summary)
+            summary_cards.append(build_dashboard_market_summary(signal_payload))
         return {
             "macro_alert": signal_agent._macro_alert(markets),
             "timestamp": utc_timestamp(),
@@ -1795,7 +1991,7 @@ async def get_orderbook(symbol: str) -> dict[str, object]:
 async def get_chart(symbol: str) -> dict[str, object]:
     """Return chart klines for a supported symbol."""
     normalized_symbol = normalize_symbol(symbol)
-    data = await pacifica_client.get_klines(symbol=normalized_symbol, interval="1h", limit=200)
+    data = await pacifica_client.get_klines(symbol=normalized_symbol, interval="1h", limit=120)
     response: dict[str, object] = {
         "symbol": normalized_symbol,
         "interval": "1h",
@@ -1843,6 +2039,12 @@ async def get_narrative(symbol: str) -> dict[str, object]:
     return await narrative_agent.analyze(validate_symbol(symbol))
 
 
+@app.get("/api/current-affairs/{symbol}")
+async def get_current_affairs(symbol: str) -> dict[str, object]:
+    """Return the live current-affairs agent output for a supported symbol."""
+    return await current_agent.run(validate_symbol(symbol))
+
+
 @app.get("/api/agents/{symbol}")
 async def get_agents(symbol: str) -> dict[str, object]:
     """Run all data agents in parallel for a supported symbol."""
@@ -1854,6 +2056,7 @@ async def get_agents(symbol: str) -> dict[str, object]:
         sentiment_result,
         narrative_result,
         orderbook_result,
+        current_affairs_result,
     ) = await asyncio.gather(
         market_agent.analyze(normalized_symbol),
         funding_agent.analyze(normalized_symbol),
@@ -1861,6 +2064,7 @@ async def get_agents(symbol: str) -> dict[str, object]:
         sentiment_agent.analyze(normalized_symbol),
         narrative_agent.analyze(normalized_symbol),
         orderbook_agent.analyze(normalized_symbol),
+        current_agent.run(normalized_symbol),
     )
     return {
         "symbol": normalized_symbol,
@@ -1870,6 +2074,7 @@ async def get_agents(symbol: str) -> dict[str, object]:
         "sentiment": sentiment_result,
         "narrative": narrative_result,
         "orderbook": orderbook_result,
+        "current_affairs": current_affairs_result,
         "timestamp": utc_timestamp(),
     }
 
@@ -2173,9 +2378,6 @@ async def get_dashboard_market(symbol: str) -> dict[str, object]:
         return await asyncio.wait_for(asyncio.shield(build_dashboard_market_payload(normalized_symbol)), timeout=18.0)
     except Exception as exc:
         logger.warning("Dashboard market degraded for %s: %s", normalized_symbol, exc)
-        previous_payload = last_good_dashboard_markets.get(normalized_symbol)
-        if isinstance(previous_payload, dict):
-            return previous_payload
         return build_minimal_dashboard_market_payload(normalized_symbol)
 
 
@@ -2209,15 +2411,7 @@ async def ask_agent_question(request: AgentChatRequest) -> dict[str, object]:
     if isinstance(cached_market_payload, dict):
         market_payload = choose_best_dashboard_market_payload(normalized_symbol, cached_market_payload)
     else:
-        signal_payload = dict(await build_enriched_signal_result(normalized_symbol))
-        signal_payload["narration"] = await build_cached_narration(normalized_symbol, signal_payload)
-        market_payload = {
-            "signal": signal_payload,
-            "reports": {
-                agent_key: build_agent_workspace_payload(normalized_symbol, agent_key, signal_payload)
-                for agent_key in AGENT_LABELS
-            },
-        }
+        market_payload = await build_fast_agent_chat_market_payload(normalized_symbol)
     signal_payload = market_payload.get("signal", {})
     reports = market_payload.get("reports", {})
     workspace = reports.get(normalized_agent)

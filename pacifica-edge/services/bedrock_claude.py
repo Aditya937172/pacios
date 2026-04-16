@@ -20,6 +20,13 @@ DEFAULT_BEDROCK_REGION = "us-east-1"
 DEFAULT_CLAUDE_HAIKU_MODEL_ID = "anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
+def _clean_secret(value: str | None) -> str:
+    """Normalize env-provided secrets so quotes or CRLF do not leak into auth values."""
+    if not isinstance(value, str):
+        return ""
+    return value.strip().strip("\"'").replace("\r", "").replace("\n", "").strip()
+
+
 class BedrockClaudeClient:
     """Thin async wrapper for Claude Haiku 4.5 on Amazon Bedrock."""
 
@@ -28,17 +35,17 @@ class BedrockClaudeClient:
         if boto3 is None or Config is None:
             raise ValueError("boto3 is not installed")
 
-        api_key = os.getenv("BEDROCK_API_KEY", "").strip() or os.getenv(
-            "AWS_BEARER_TOKEN_BEDROCK", ""
-        ).strip()
+        api_key = _clean_secret(os.getenv("BEDROCK_API_KEY")) or _clean_secret(
+            os.getenv("AWS_BEARER_TOKEN_BEDROCK", "")
+        )
         if not api_key:
             raise ValueError("BEDROCK_API_KEY is not set")
 
         os.environ.setdefault("AWS_BEARER_TOKEN_BEDROCK", api_key)
         self.api_key = api_key
-        self.region = os.getenv("BEDROCK_REGION", DEFAULT_BEDROCK_REGION).strip() or DEFAULT_BEDROCK_REGION
+        self.region = _clean_secret(os.getenv("BEDROCK_REGION", DEFAULT_BEDROCK_REGION)) or DEFAULT_BEDROCK_REGION
         self.model_id = (
-            os.getenv("BEDROCK_MODEL_ID", DEFAULT_CLAUDE_HAIKU_MODEL_ID).strip()
+            _clean_secret(os.getenv("BEDROCK_MODEL_ID", DEFAULT_CLAUDE_HAIKU_MODEL_ID))
             or DEFAULT_CLAUDE_HAIKU_MODEL_ID
         )
         self.client = boto3.client(

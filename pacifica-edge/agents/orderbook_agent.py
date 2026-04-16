@@ -17,7 +17,6 @@ class OrderBookAgent:
     def __init__(self, pacifica_client: PacificaClient) -> None:
         """Initialize OrderBookAgent with a Pacifica client."""
         self.pacifica_client = pacifica_client
-        self._last_good_by_symbol: Dict[str, Dict[str, Any]] = {}
 
     async def analyze(self, symbol: str) -> Dict[str, Any]:
         """Analyze the order book microstructure for the given Pacifica symbol."""
@@ -66,19 +65,9 @@ class OrderBookAgent:
                 "depth_data": self._build_depth_data(bids, asks),
                 "timestamp": self._timestamp(),
             }
-            self._last_good_by_symbol[normalized_symbol] = payload
             return payload
         except Exception:
             logger.exception("Orderbook analysis failed for %s", normalized_symbol)
-            cached = self._last_good_by_symbol.get(normalized_symbol)
-            if isinstance(cached, dict):
-                cached_payload = dict(cached)
-                cached_payload["stale"] = True
-                cached_payload["reason"] = (
-                    f"{cached_payload.get('reason', 'Using cached orderbook context.')} Live orderbook refresh failed, so this answer is using the last good depth read."
-                )
-                cached_payload["timestamp"] = self._timestamp()
-                return cached_payload
             return self._neutral_payload(
                 symbol=normalized_symbol,
                 reason="Orderbook analysis encountered an unexpected error",

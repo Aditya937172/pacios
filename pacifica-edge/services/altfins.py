@@ -12,19 +12,26 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def _clean_secret(value: str | None) -> str:
+    """Normalize env-provided secrets so quotes or CRLF do not break auth headers."""
+    if not isinstance(value, str):
+        return ""
+    return value.strip().strip("\"'").replace("\r", "").replace("\n", "").strip()
+
+
 class AltFinsClient:
     """Fetch and normalize altFINS analytics for major PacificaEdge symbols."""
 
     def __init__(self) -> None:
         """Initialize the altFINS client from environment variables."""
-        api_key = os.getenv("ALTFNS_API_KEY", "").strip() or os.getenv("ALTFINS_API_KEY", "").strip()
+        api_key = _clean_secret(os.getenv("ALTFNS_API_KEY")) or _clean_secret(os.getenv("ALTFINS_API_KEY"))
         if not api_key:
             raise ValueError("ALTFNS_API_KEY is not set")
         self.api_key = api_key
-        self.base_url = os.getenv(
+        self.base_url = _clean_secret(os.getenv(
             "ALTFINS_API_BASE_URL",
             "https://altfins.com/api/v2/public",
-        ).rstrip("/")
+        )).rstrip("/")
         self.timeout = 5.0
 
     async def get_asset_analytics(self, symbol: str) -> dict[str, Any]:

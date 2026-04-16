@@ -12,6 +12,13 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def _clean_secret(value: str | None) -> str:
+    """Normalize env-provided credentials so quotes or CRLF do not leak into headers."""
+    if not isinstance(value, str):
+        return ""
+    return value.strip().strip("\"'").replace("\r", "").replace("\n", "").strip()
+
+
 class NeMoClient:
     """Async client for NVIDIA NeMo chat completions."""
 
@@ -19,14 +26,14 @@ class NeMoClient:
 
     def __init__(self) -> None:
         """Initialize the NeMo client from environment variables."""
-        api_key = os.getenv("NEMO_API_KEY", "").strip()
+        api_key = _clean_secret(os.getenv("NEMO_API_KEY"))
         if not api_key:
             raise ValueError("NEMO_API_KEY is not set")
         self.api_key = api_key
-        self.base_url = os.getenv(
-            "NEMO_API_BASE_URL", "https://integrate.api.nvidia.com/v1"
+        self.base_url = _clean_secret(
+            os.getenv("NEMO_API_BASE_URL", "https://integrate.api.nvidia.com/v1")
         ).rstrip("/")
-        raw_model_name = os.getenv("NEMO_MODEL_NAME", "nemotron-3-super-120b-a12b").strip()
+        raw_model_name = _clean_secret(os.getenv("NEMO_MODEL_NAME", "nemotron-3-super-120b-a12b"))
         self.model_name = self._normalize_model_name(raw_model_name)
 
     async def chat_json(

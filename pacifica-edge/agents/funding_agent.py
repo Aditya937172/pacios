@@ -17,7 +17,6 @@ class FundingAgent:
     def __init__(self, pacifica_client: PacificaClient) -> None:
         """Initialize the agent with a Pacifica client."""
         self.pacifica_client = pacifica_client
-        self._last_good_by_symbol: dict[str, dict[str, Any]] = {}
 
     async def analyze(self, symbol: str) -> dict[str, Any]:
         """Analyze funding data for a market symbol."""
@@ -90,20 +89,9 @@ class FundingAgent:
                 "data_source": source,
                 "timestamp": timestamp,
             }
-            self._last_good_by_symbol[symbol.upper()] = payload
             return payload
         except Exception as exc:
             logger.exception("Funding analysis failed for %s", symbol)
-            cached = self._last_good_by_symbol.get(symbol.upper())
-            if isinstance(cached, dict):
-                cached_payload = dict(cached)
-                cached_payload["reason"] = (
-                    f"{cached_payload.get('reason', 'Using cached funding context.')} Live funding refresh failed, so this answer is using the last good funding read."
-                )
-                cached_payload["stale"] = True
-                cached_payload["error"] = str(exc)
-                cached_payload["timestamp"] = timestamp
-                return cached_payload
             fallback = self._neutral_payload(symbol=symbol, timestamp=timestamp)
             fallback["error"] = str(exc)
             return fallback

@@ -12,13 +12,20 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def _clean_secret(value: str | None) -> str:
+    """Normalize env-provided secrets so quotes or CRLF do not break auth headers."""
+    if not isinstance(value, str):
+        return ""
+    return value.strip().strip("\"'").replace("\r", "").replace("\n", "").strip()
+
+
 async def fetch_news_context(symbol: str, narrative_summary: str | None = None) -> dict[str, Any]:
     """Fetch a compact Tavily news context block for a PacificaEdge symbol."""
     underlying = _underlying_symbol(symbol)
     if not underlying:
         return _fallback_news_context("")
 
-    api_key = os.getenv("TAVILY_API_KEY", "").strip()
+    api_key = _clean_secret(os.getenv("TAVILY_API_KEY"))
     if not api_key:
         logger.warning("TAVILY_API_KEY is not set")
         return _fallback_news_context(underlying)

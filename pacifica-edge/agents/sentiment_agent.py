@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from services.current_affairs import fetch_current_affairs_context
 from services.elfa import ElfaClient
-from services.tavily_news import fetch_news_context
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,6 @@ class SentimentAgent:
     def __init__(self, elfa_client: ElfaClient | None) -> None:
         """Initialize the agent with an Elfa client dependency."""
         self.elfa_client = elfa_client
-        self._last_good_by_symbol: dict[str, dict[str, Any]] = {}
 
     async def analyze(self, symbol: str) -> dict[str, Any]:
         """Analyze social sentiment for a supported market symbol."""
@@ -31,13 +31,17 @@ class SentimentAgent:
             if self.elfa_client is None:
                 raise ValueError("Elfa client is unavailable")
 
-            trending_data = await self.elfa_client.get_trending_tokens()
+            trending_data, mentions_data = await asyncio.wait_for(
+                asyncio.gather(
+                    self.elfa_client.get_trending_tokens(),
+                    self.elfa_client.get_token_sentiment(token),
+                ),
+                timeout=2.4,
+            )
             if "error" in trending_data:
-                raise ValueError(trending_data["error"])
-
-            mentions_data = await self.elfa_client.get_token_sentiment(token)
+                raise ValueError(str(trending_data["error"]))
             if "error" in mentions_data:
-                raise ValueError(mentions_data["error"])
+                raise ValueError(str(mentions_data["error"]))
 
             trending_tokens = self._extract_trending_tokens(trending_data)
             average_count = self._average_trending_count(trending_tokens)
@@ -71,11 +75,10 @@ class SentimentAgent:
                 "powered_by": "Elfa AI",
                 "timestamp": timestamp,
             }
-            self._last_good_by_symbol[symbol.upper()] = payload
             return payload
         except Exception as exc:
             logger.warning("Sentiment analysis failed for %s: %s", symbol, exc)
-            fallback = await self._fallback_from_cache_or_news(symbol=symbol, token=token, timestamp=timestamp)
+            fallback = await self._fallback_from_current_affairs(symbol=symbol, token=token, timestamp=timestamp)
             fallback["error"] = str(exc)
             return fallback
 
@@ -198,25 +201,20 @@ class SentimentAgent:
             "timestamp": timestamp,
         }
 
-    async def _fallback_from_cache_or_news(
+    async def _fallback_from_current_affairs(
         self,
         symbol: str,
         token: str,
         timestamp: str,
     ) -> dict[str, Any]:
-        """Use the last good Elfa result first, then fall back to Tavily attention context."""
-        cached = self._last_good_by_symbol.get(symbol.upper())
-        if isinstance(cached, dict):
-            cached_payload = dict(cached)
-            cached_payload["stale"] = True
-            cached_payload["reason"] = (
-                f"{cached_payload.get('reason', 'Using cached attention context.')} Live Elfa refresh failed, so this answer is using the last good attention read."
-            )
-            cached_payload["timestamp"] = timestamp
-            return cached_payload
-
-        news_context = await fetch_news_context(symbol)
-        news_payload = self._news_attention_payload(symbol=symbol, token=token, timestamp=timestamp, news_context=news_context)
+        """Use fresh current-affairs context when Elfa is unavailable or rate-limited."""
+        current_affairs = await fetch_current_affairs_context(symbol)
+        news_payload = self._news_attention_payload(
+            symbol=symbol,
+            token=token,
+            timestamp=timestamp,
+            news_context=current_affairs,
+        )
         if news_payload is not None:
             return news_payload
         return self._fallback(symbol=symbol, token=token, timestamp=timestamp)
@@ -228,7 +226,7 @@ class SentimentAgent:
         timestamp: str,
         news_context: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Build a market-attention fallback from Tavily when Elfa is rate-limited."""
+        """Build a market-attention fallback from live current-affairs search."""
         if not isinstance(news_context, dict) or not news_context.get("available"):
             return None
         headlines = news_context.get("headlines", [])
@@ -257,8 +255,8 @@ class SentimentAgent:
             "rank_in_trending": None,
             "signal": signal,
             "signal_value": 1 if signal == "BULLISH" else -1 if signal == "BEARISH" else 0,
-            "reason": f"Elfa is rate-limited, so this attention read is using Tavily headlines led by {lead_title}.",
-            "powered_by": "Tavily attention fallback",
+            "reason": f"Elfa is unavailable, so this attention read is using fresh current-affairs headlines led by {lead_title}.",
+            "powered_by": "Current-affairs web search fallback",
             "timestamp": timestamp,
         }
 

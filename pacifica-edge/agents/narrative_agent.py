@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 import logging
 from typing import Any, Dict
 
+from services.current_affairs import fetch_current_affairs_context
 from services.elfa import ElfaClient
 from services.nemo_llm import NeMoClient
-from services.tavily_news import fetch_news_context
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,6 @@ class NarrativeAgent:
         self.elfa_client = elfa_client
         self.nemo_client = nemo_client
         self.fallback_reason = "Insufficient data from Elfa AI or NeMo 120B."
-        self._last_good_by_symbol: dict[str, Dict[str, Any]] = {}
 
     async def analyze(self, symbol: str) -> dict[str, Any]:
         """Analyze social narratives around a supported Pacifica symbol."""
@@ -44,7 +44,10 @@ class NarrativeAgent:
                     reason=self.fallback_reason,
                 )
 
-            summaries = await self.elfa_client.get_top_mentions_text_summaries(token, limit=10)
+            summaries = await asyncio.wait_for(
+                self.elfa_client.get_top_mentions_text_summaries(token, limit=10),
+                timeout=2.4,
+            )
             if not summaries:
                 return await self._news_or_neutral_payload(
                     symbol=normalized_symbol,
@@ -58,10 +61,13 @@ class NarrativeAgent:
                 "Do not include markdown, analysis, or commentary outside the JSON object."
             )
             user_prompt = self._build_user_prompt(token, normalized_symbol, summaries)
-            result = await self.nemo_client.chat_json(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                max_tokens=400,
+            result = await asyncio.wait_for(
+                self.nemo_client.chat_json(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_tokens=400,
+                ),
+                timeout=2.4,
             )
             if "error" in result:
                 return await self._news_or_neutral_payload(
@@ -92,20 +98,9 @@ class NarrativeAgent:
                 "powered_by": "Elfa AI + NeMo 120B",
                 "timestamp": self._timestamp(),
             }
-            self._last_good_by_symbol[normalized_symbol] = payload
             return payload
         except Exception as exc:
             logger.exception("Narrative analysis failed for %s", normalized_symbol)
-            cached = self._last_good_by_symbol.get(normalized_symbol)
-            if isinstance(cached, dict):
-                cached_payload = dict(cached)
-                cached_payload["reason"] = (
-                    f"{cached_payload.get('reason', 'Using cached narrative context.')} Live narrative refresh failed, so this answer is using the last good narrative read."
-                )
-                cached_payload["stale"] = True
-                cached_payload["error"] = str(exc)
-                cached_payload["timestamp"] = self._timestamp()
-                return cached_payload
             fallback = await self._news_or_neutral_payload(
                 symbol=normalized_symbol,
                 token=token,
@@ -214,21 +209,11 @@ Return exactly one JSON object with this schema:
         }
 
     async def _news_or_neutral_payload(self, symbol: str, token: str, reason: str) -> Dict[str, Any]:
-        """Use Tavily current-affairs context as a live narrative fallback when Elfa/NeMo is thin."""
-        news_context = await fetch_news_context(symbol)
+        """Use live current-affairs context as a narrative fallback when Elfa/NeMo is thin."""
+        news_context = await fetch_current_affairs_context(symbol)
         news_payload = self._news_fallback_payload(symbol=symbol, token=token, news_context=news_context)
         if news_payload is not None:
-            self._last_good_by_symbol[symbol] = news_payload
             return news_payload
-        cached = self._last_good_by_symbol.get(symbol)
-        if isinstance(cached, dict):
-            cached_payload = dict(cached)
-            cached_payload["stale"] = True
-            cached_payload["reason"] = (
-                f"{cached_payload.get('reason', 'Using cached narrative context.')} Live current-affairs coverage is thin, so this answer is using the last good narrative read."
-            )
-            cached_payload["timestamp"] = self._timestamp()
-            return cached_payload
         return self._neutral_payload(symbol=symbol, token=token, reason=reason)
 
     def _news_fallback_payload(
@@ -237,7 +222,7 @@ Return exactly one JSON object with this schema:
         token: str,
         news_context: Dict[str, Any],
     ) -> Dict[str, Any] | None:
-        """Build a narrative read from Tavily themes and headlines when social coverage is unavailable."""
+        """Build a narrative read from fresh web headlines when social coverage is unavailable."""
         if not isinstance(news_context, dict) or not news_context.get("available"):
             return None
         headlines = news_context.get("headlines", [])
@@ -280,8 +265,8 @@ Return exactly one JSON object with this schema:
             "signal": signal,
             "signal_value": 1 if signal == "BULLISH" else -1 if signal == "BEARISH" else 0,
             "confidence": confidence,
-            "reason": f"Tavily current-affairs fallback sees {bullish_hits} bullish cues and {bearish_hits} bearish cues across the latest headlines.",
-            "powered_by": "Tavily news fallback",
+            "reason": f"Current-affairs web search sees {bullish_hits} bullish cues and {bearish_hits} bearish cues across the latest headlines.",
+            "powered_by": "Current-affairs web search fallback",
             "timestamp": self._timestamp(),
         }
 

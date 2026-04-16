@@ -41,19 +41,29 @@ class SignalAgent:
             "BEARISH": -1,
             "NEUTRAL": 0,
         }
+        self.agent_weights: dict[str, float] = {
+            "market": 1.30,
+            "funding": 1.05,
+            "liquidation": 0.75,
+            "sentiment": 0.85,
+            "narrative": 0.85,
+            "orderbook": 1.10,
+        }
 
     async def analyze(self, symbol: str) -> dict[str, Any]:
         """Aggregate all underlying agent signals into a final decision."""
         timestamp = self._timestamp()
 
         try:
+            core_timeout = 4.0
+            research_timeout = 3.0
             results = await asyncio.gather(
-                asyncio.wait_for(self.market_agent.run(symbol), timeout=6.0),
-                asyncio.wait_for(self.funding_agent.run(symbol), timeout=6.0),
-                asyncio.wait_for(self.liquidation_agent.run(symbol), timeout=6.0),
-                asyncio.wait_for(self.sentiment_agent.run(symbol), timeout=6.0),
-                asyncio.wait_for(self.narrative_agent.run(symbol), timeout=6.0),
-                asyncio.wait_for(self.orderbook_agent.run(symbol), timeout=6.0),
+                asyncio.wait_for(self.market_agent.run(symbol), timeout=core_timeout),
+                asyncio.wait_for(self.funding_agent.run(symbol), timeout=core_timeout),
+                asyncio.wait_for(self.liquidation_agent.run(symbol), timeout=core_timeout),
+                asyncio.wait_for(self.sentiment_agent.run(symbol), timeout=research_timeout),
+                asyncio.wait_for(self.narrative_agent.run(symbol), timeout=research_timeout),
+                asyncio.wait_for(self.orderbook_agent.run(symbol), timeout=core_timeout),
                 return_exceptions=True,
             )
             neutral_agents = self._neutral_agents(symbol, timestamp)
@@ -69,7 +79,7 @@ class SignalAgent:
 
             score = self._calculate_score(agent_results)
             final_signal = self._final_signal(score)
-            confidence_pct = (abs(score) / 6) * 100.0
+            confidence_pct = self._confidence_pct(score)
             reasoning = self._build_reasoning(agent_results)
 
             return {
@@ -130,26 +140,86 @@ class SignalAgent:
                 "error": str(exc),
             }
 
-    def _calculate_score(self, agent_results: dict[str, dict[str, Any]]) -> int:
-        """Calculate the combined score across all agents."""
-        return sum(
-            self.signal_scores.get(result.get("signal", "NEUTRAL"), 0)
-            for result in agent_results.values()
-        )
+    def _calculate_score(self, agent_results: dict[str, dict[str, Any]]) -> float:
+        """Calculate a weighted combined score across all agents."""
+        weighted_score = 0.0
+        for agent_key, result in agent_results.items():
+            if not isinstance(result, dict):
+                continue
+            verdict = self._agent_verdict(agent_key, result)
+            base_score = float(self.signal_scores.get(verdict, 0))
+            if base_score == 0:
+                continue
+            weight = self.agent_weights.get(agent_key, 1.0)
+            boost = self._agent_conviction_boost(agent_key, result)
+            weighted_score += base_score * weight * (1.0 + boost)
+        return round(weighted_score, 2)
 
-    def _final_signal(self, score: int) -> str:
+    def _final_signal(self, score: float) -> str:
         """Convert a score into the final trading action."""
-        if score >= 2:
+        if score >= 1.6:
             return "BUY"
-        if score <= -2:
+        if score <= -1.6:
             return "SELL"
         return "HOLD"
 
+    def _confidence_pct(self, score: float) -> float:
+        """Convert a weighted score into a bounded confidence percentage."""
+        max_score = sum(weight * 1.4 for weight in self.agent_weights.values())
+        if max_score <= 0:
+            return 0.0
+        return round(min(100.0, (abs(score) / max_score) * 100.0), 1)
+
+    def _agent_verdict(self, agent_key: str, result: dict[str, Any]) -> str:
+        """Return the normalized verdict for one specialist agent."""
+        raw_value = result.get("trend") if agent_key == "market" else result.get("signal")
+        candidate = str(raw_value or "NEUTRAL").upper()
+        if candidate in self.signal_scores:
+            return candidate
+        return "NEUTRAL"
+
+    def _agent_conviction_boost(self, agent_key: str, result: dict[str, Any]) -> float:
+        """Estimate extra conviction from each agent's own numeric evidence."""
+        try:
+            if agent_key == "market":
+                change_24h = abs(float(result.get("change_24h", 0.0) or 0.0))
+                return min(0.35, change_24h / 8.0)
+            if agent_key == "funding":
+                annualized_rate_pct = abs(float(result.get("annualized_rate_pct", 0.0) or 0.0))
+                return min(0.40, annualized_rate_pct / 40.0)
+            if agent_key == "liquidation":
+                total_liquidations = abs(float(result.get("total_liquidations_usd", 0.0) or 0.0))
+                return min(0.35, total_liquidations / 100000.0)
+            if agent_key == "sentiment":
+                sentiment_score = float(result.get("sentiment_score", 50.0) or 50.0)
+                return min(0.30, abs(sentiment_score - 50.0) / 50.0)
+            if agent_key == "narrative":
+                confidence = str(result.get("confidence", "LOW")).upper()
+                return {"LOW": 0.10, "MEDIUM": 0.22, "HIGH": 0.35}.get(confidence, 0.0)
+            if agent_key == "orderbook":
+                imbalance_ratio = float(result.get("imbalance_ratio", 0.5) or 0.5)
+                return min(0.40, abs(imbalance_ratio - 0.5) * 2.0)
+        except (TypeError, ValueError):
+            return 0.0
+        return 0.0
+
     def _build_reasoning(self, agent_results: dict[str, dict[str, Any]]) -> str:
         """Build a human-readable summary of the combined agent view."""
-        bullish_count = sum(1 for result in agent_results.values() if result.get("signal") == "BULLISH")
-        bearish_count = sum(1 for result in agent_results.values() if result.get("signal") == "BEARISH")
-        neutral_count = sum(1 for result in agent_results.values() if result.get("signal") == "NEUTRAL")
+        bullish_count = sum(
+            1
+            for agent_key, result in agent_results.items()
+            if self._agent_verdict(agent_key, result) == "BULLISH"
+        )
+        bearish_count = sum(
+            1
+            for agent_key, result in agent_results.items()
+            if self._agent_verdict(agent_key, result) == "BEARISH"
+        )
+        neutral_count = sum(
+            1
+            for agent_key, result in agent_results.items()
+            if self._agent_verdict(agent_key, result) == "NEUTRAL"
+        )
 
         parts: list[str] = [
             f"{bullish_count} of 6 agents are BULLISH, {bearish_count} are BEARISH, and {neutral_count} are NEUTRAL."

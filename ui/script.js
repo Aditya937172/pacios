@@ -4,9 +4,9 @@ const API_BASE = (
 )
     ? ""
     : "http://127.0.0.1:8000";
-const REQUEST_TIMEOUT_MS = 10000;
-const CLIENT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const LOCAL_CACHE_PREFIX = "pacificaedge-dashboard:v3:";
+const REQUEST_TIMEOUT_MS = 20000;
+const CLIENT_CACHE_TTL_MS = 20 * 1000;
+const LOCAL_CACHE_PREFIX = "pacificaedge-dashboard:v6:";
 
 const AGENT_META = {
     frontdesk: { title: "Frontdesk Agent", description: "Collaborative desk that combines all specialist views." },
@@ -482,6 +482,7 @@ async function fetchWithTimeout(url, ms = 10000, options = {}) {
     try {
         const response = await fetch(url, {
             headers: { "Content-Type": "application/json" },
+            cache: "no-store",
             signal: controller.signal,
             ...options,
         });
@@ -494,6 +495,15 @@ async function fetchWithTimeout(url, ms = 10000, options = {}) {
     } finally {
         window.clearTimeout(timeoutId);
     }
+}
+
+function escapeHtml(value) {
+    return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
 }
 
 function cacheName(key) {
@@ -543,11 +553,11 @@ function getStaleCachedData(key) {
 }
 
 async function getDashboardResource(key, url, ms = REQUEST_TIMEOUT_MS, target = "dashboard") {
-    const fresh = getFreshCachedData(key);
-    if (fresh) return fresh;
     const data = await fetchWithTimeout(url, ms);
     if (data) return writeCacheRecord(key, data, target);
-    return getStaleCachedData(key);
+    const fresh = getFreshCachedData(key);
+    if (fresh) return fresh;
+    return null;
 }
 
 async function runNavigation(task) {
@@ -823,7 +833,7 @@ function setChatMessages(messages) {
     const container = document.getElementById("chatMessages");
     container.innerHTML = messages.map((message) => {
         const role = message.role === "user" ? "user" : "assistant";
-        return `<div class="chat-message ${role}">${message.text}</div>`;
+        return `<div class="chat-message ${role}">${escapeHtml(message.text)}</div>`;
     }).join("");
     container.scrollTop = container.scrollHeight;
 }
@@ -861,7 +871,7 @@ async function askAgent(question) {
     }
     appendChatMessage("user", question);
     try {
-        const response = await fetchWithTimeout(`${API_BASE}/api/agent/ask`, 60000, {
+        const response = await fetchWithTimeout(`${API_BASE}/api/agent/ask`, 25000, {
             method: "POST",
             body: JSON.stringify({
                 symbol: state.currentMarket,
@@ -870,7 +880,10 @@ async function askAgent(question) {
             }),
         });
         if (!response) {
-            appendChatMessage("assistant", "Fresh reply took too long.\nWhy: The latest live report is still on screen.\nNext: Try a shorter question or ask again.");
+            appendChatMessage(
+                "assistant",
+                "- Call: Fresh reply took too long.\n- Why: The latest live report is still on screen.\n- Next: Try a shorter question or ask again."
+            );
             return null;
         }
         appendChatMessage("assistant", response.answer);
@@ -899,10 +912,10 @@ async function loadOverview(options = {}) {
     const { fromMarketView = false } = options;
     const shouldLoadWorkspace = state.currentMarket === "ALL" || !fromMarketView;
     const [overview, allMarkets, allMarketsWorkspace] = await Promise.all([
-        getDashboardResource("overview", `${API_BASE}/api/dashboard/overview`, 12000),
-        getDashboardResource("all-markets", `${API_BASE}/api/dashboard/all-markets`, 12000),
+        getDashboardResource("overview", `${API_BASE}/api/dashboard/overview`, 18000),
+        getDashboardResource("all-markets", `${API_BASE}/api/dashboard/all-markets`, 18000),
         shouldLoadWorkspace
-            ? getDashboardResource("all-markets-workspace", `${API_BASE}/api/dashboard/all-markets/workspace`, 12000)
+            ? getDashboardResource("all-markets-workspace", `${API_BASE}/api/dashboard/all-markets/workspace`, 20000)
             : Promise.resolve(null),
     ]);
     if (overview) {
@@ -935,7 +948,7 @@ async function loadMarket(symbol, options = {}) {
     const payload = await getDashboardResource(
         cacheKey,
         `${API_BASE}/api/dashboard/market/${symbol}`,
-        15000,
+        25000,
         "market",
     );
     if (requestId !== state.marketRequestId) {
