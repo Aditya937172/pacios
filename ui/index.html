@@ -302,16 +302,25 @@
                 </form>
             </section>
 
-            <section class="panel" id="allMarketsPanel" hidden>
+            <section class="panel market-board-panel" id="allMarketsPanel" hidden>
                 <div class="panel-header compact">
                     <div>
                         <div class="eyebrow">All Markets</div>
                         <h2>Live Pacifica market board</h2>
                     </div>
-                    <div class="panel-note">Click any market to open the full desk. The quick signal here is a
-                        lightweight overview, not the full multi-agent verdict.</div>
+                    <div class="panel-note">Click any market to reopen the full desk with the live multi-agent stack.</div>
                 </div>
-                <div class="agent-grid" id="allMarketsGrid"></div>
+                <div class="market-board-summary">
+                    <div class="market-board-stat">
+                        <span class="market-board-label">Coverage</span>
+                        <strong id="marketBoardCoverage">8 markets</strong>
+                    </div>
+                    <div class="market-board-stat">
+                        <span class="market-board-label">Use</span>
+                        <strong>Choose a market, then drill into agents</strong>
+                    </div>
+                </div>
+                <div class="market-board-grid" id="allMarketsGrid"></div>
             </section>
 
             <section class="workspace-panel panel agent-modal" id="agentPanelModal" hidden>
@@ -324,7 +333,7 @@
                             </div>
                             <div style="display:flex; gap:10px; align-items:center;">
                                 <div class="workspace-badge" id="workspaceVerdict">Bullish</div>
-                                <button type="button" class="toggle" id="closeAgentPanel">Back to Desk</button>
+                                <button type="button" class="toggle" id="closeAgentPanel">Close Panel</button>
                             </div>
                         </div>
 

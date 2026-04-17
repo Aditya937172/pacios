@@ -57,10 +57,13 @@ function openAgentPanel() {
     if (panel) {
         state.panelOpen = true;
         panel.hidden = false;
+        syncChromeOffset();
         panel.scrollTop = 0;
         document.body.classList.add("panel-open");
-        syncChromeOffset();
         updateRouteTabState();
+        window.requestAnimationFrame(() => {
+            panel.classList.add("panel-visible");
+        });
     }
 }
 
@@ -68,7 +71,10 @@ function closeAgentPanel() {
     const panel = document.getElementById("agentPanelModal");
     state.panelOpen = false;
     document.body.classList.remove("panel-open");
-    if (panel) panel.hidden = true;
+    if (panel) {
+        panel.classList.remove("panel-visible");
+        panel.hidden = true;
+    }
     updateRouteTabState();
 }
 
@@ -108,6 +114,9 @@ function setDashboardView(view) {
     const allMarketsPanel = document.getElementById("allMarketsPanel");
     if (allMarketsPanel) {
         allMarketsPanel.hidden = view !== "markets";
+    }
+    if (view === "markets") {
+        state.currentAgent = "frontdesk";
     }
     syncChromeOffset();
     updateRouteTabState();
@@ -999,6 +1008,7 @@ function renderOverview(overview) {
 function renderAllMarketsBoard(markets) {
     const container = document.getElementById("allMarketsGrid");
     if (!container) return;
+    const coverage = document.getElementById("marketBoardCoverage");
     let rows = Array.isArray(markets) ? markets : [];
     if (!rows.length && Array.isArray(state.overview?.summary_cards)) {
         rows = state.overview.summary_cards.map((card) => {
@@ -1033,25 +1043,45 @@ function renderAllMarketsBoard(markets) {
         });
     }
     state.allMarketsBoard = rows;
-    container.innerHTML = rows.map((market, index) => `
-        <button class="agent-card" data-market-card="${market.symbol}">
-            <div class="agent-topline">
-                <span class="agent-index">${String(index + 1).padStart(2, "0")}</span>
-                <span class="verdict ${market.quick_signal === "BUY" ? "verdict-bullish" : market.quick_signal === "SELL" ? "verdict-bearish" : "verdict-neutral"}">${market.quick_signal}</span>
-            </div>
-            <h3>${market.symbol}</h3>
-            <div class="agent-metric">${formatPrice(market.price)}</div>
-            <p>${formatPct(market.change_24h, 2)} 24h change | ${formatCompactUSD(market.open_interest)} OI | ${formatPct(market.funding_apy, 2)} funding APY</p>
-            <div class="agent-footer">
-                <span>${formatCompactUSD(market.volume_24h)} volume</span>
-                <span>${market.max_leverage ? `${market.max_leverage}x max` : "Perp"}</span>
-            </div>
-        </button>
-    `).join("");
+    if (coverage) {
+        coverage.textContent = `${rows.length} markets`;
+    }
+    container.innerHTML = rows.map((market, index) => {
+        const quickSignal = String(market.quick_signal || "HOLD").toUpperCase();
+        const verdictClass = quickSignal === "BUY"
+            ? "verdict-bullish"
+            : quickSignal === "SELL"
+                ? "verdict-bearish"
+                : "verdict-neutral";
+        return `
+            <button class="market-board-card" data-market-card="${market.symbol}">
+                <span class="market-board-accent ${verdictClass}"></span>
+                <div class="market-board-topline">
+                    <span class="market-board-index">${String(index + 1).padStart(2, "0")}</span>
+                    <span class="verdict ${verdictClass}">${quickSignal}</span>
+                </div>
+                <div class="market-board-symbol">${market.symbol}</div>
+                <div class="market-board-price-row">
+                    <strong>${formatPrice(market.price)}</strong>
+                    <span class="${Number(market.change_24h || 0) >= 0 ? "positive" : "negative"}">${formatPct(market.change_24h, 2)}</span>
+                </div>
+                <div class="market-board-metrics">
+                    <span>OI ${formatCompactUSD(market.open_interest)}</span>
+                    <span>VOL ${formatCompactUSD(market.volume_24h)}</span>
+                    <span>Funding ${formatPct(market.funding_apy, 2)}</span>
+                </div>
+                <div class="market-board-footer">
+                    <span>${market.max_leverage ? `${market.max_leverage}x max` : "Perpetual market"}</span>
+                    <span>Open desk →</span>
+                </div>
+            </button>
+        `;
+    }).join("");
     container.querySelectorAll("[data-market-card]").forEach((button) => {
         button.addEventListener("click", async () => {
             await runNavigation(async () => {
                 const symbol = button.dataset.marketCard;
+                closeAgentPanel();
                 setDashboardView("desk");
                 state.currentAgent = "frontdesk";
                 setActiveAgentCard("frontdesk");
@@ -1602,6 +1632,7 @@ function bindRouteTabs() {
                 }
                 if (button.dataset.view === "markets") {
                     closeAgentPanel();
+                    setActiveAgentCard("frontdesk");
                     setDashboardView("markets");
                     await loadOverview({ fromMarketView: false }).catch((error) => console.error("Markets overview load failed:", error));
                     return;
