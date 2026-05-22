@@ -2581,6 +2581,12 @@ body.panel-open .dashboard-grid > :not(.agent-modal) {
 }
 
 @media (max-width: 820px) {
+    .terminal-chrome {
+        position: static;
+        top: auto;
+        overflow: visible;
+    }
+
     .top-nav {
         grid-template-columns: 1fr;
     }
