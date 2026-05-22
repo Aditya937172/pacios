@@ -2581,36 +2581,129 @@ body.panel-open .dashboard-grid > :not(.agent-modal) {
 }
 
 @media (max-width: 820px) {
+
+    /* ── Chrome panel: no longer sticky on mobile so the full UI is reachable ── */
     .terminal-chrome {
-        position: static;
-        top: auto;
+        position: relative;
         overflow: visible;
     }
 
+    /* ── Top-nav: brand + status side-by-side, tabs flow below ── */
     .top-nav {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
     }
 
-    .brand-lockup,
-    .nav-tabs button,
+    .brand-lockup {
+        border-right: 0;
+        border-bottom: 0.5px solid rgba(156, 145, 130, 0.46);
+        padding: 12px 14px;
+    }
+
     .nav-status {
         border-right: 0;
+        border-bottom: 0.5px solid rgba(156, 145, 130, 0.46);
+        min-width: 0;
+        padding: 10px 14px;
     }
 
     .nav-tabs {
+        grid-column: 1 / -1;
         overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
     }
 
-    .snapshot-panel .metrics-row,
+    .nav-tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    .nav-tabs button {
+        border-right: 0.5px solid rgba(156, 145, 130, 0.46);
+        min-width: 110px;
+        flex-shrink: 0;
+    }
+
+    /* ── Snapshot metrics: horizontal scroll instead of single-column stack ── */
+    .snapshot-panel .metrics-row {
+        display: flex;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        /* reset grid-template-columns set by higher breakpoints */
+        grid-template-columns: unset;
+    }
+
+    .snapshot-panel .metrics-row::-webkit-scrollbar {
+        display: none;
+    }
+
+    .snapshot-panel .metric-card {
+        flex: 0 0 auto;
+        min-width: 150px;
+    }
+
+    /* ── Agent grid + sibling grid: single column ── */
     .agents-panel .agent-grid,
     .workspace-sibling-grid {
         grid-template-columns: 1fr;
     }
 
+    /* ── Agent modal: tighter inset ── */
     .agent-modal {
         top: 8px;
         left: 8px;
         right: 8px;
         bottom: 8px;
+    }
+
+    /* ── Macro banner: compact single-column on narrow screens ── */
+    .macro-banner {
+        grid-template-columns: 12px 1fr;
+        grid-template-rows: auto auto;
+    }
+
+    .macro-meta {
+        grid-column: 2;
+        text-align: left;
+    }
+
+    /* ── Terminal shell padding ── */
+    .terminal-shell {
+        padding: 10px 10px 24px;
+    }
+}
+
+@media (max-width: 480px) {
+    .logo {
+        font-size: 0.9rem;
+    }
+
+    .nav-tabs button {
+        min-width: 90px;
+        padding: 12px 10px;
+    }
+
+    .snapshot-panel .metric-card {
+        min-width: 130px;
+    }
+
+    .tab-pill,
+    .desk-call-pill {
+        min-width: 54px;
+        font-size: 0.7rem;
+    }
+
+    .agents-panel .agent-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .proof-row {
+        display: none;
+    }
+
+    .frontdesk-hero .final-signal {
+        font-size: 2.6rem;
     }
 }
