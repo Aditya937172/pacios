@@ -1619,8 +1619,7 @@ body {
 }
 
 .terminal-chrome {
-    position: sticky;
-    top: 14px;
+    position: relative;
     z-index: 25;
     border: 1px solid rgba(156, 145, 130, 0.48);
     border-radius: 22px;
@@ -2581,12 +2580,6 @@ body.panel-open .dashboard-grid > :not(.agent-modal) {
 }
 
 @media (max-width: 820px) {
-
-    /* ── Chrome panel: no longer sticky on mobile so the full UI is reachable ── */
-    .terminal-chrome {
-        position: relative;
-        overflow: visible;
-    }
 
     /* ── Top-nav: brand + status side-by-side, tabs flow below ── */
     .top-nav {
