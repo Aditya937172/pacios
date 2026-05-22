@@ -2585,7 +2585,6 @@ body.panel-open .dashboard-grid > :not(.agent-modal) {
     /* ── Chrome panel: no longer sticky on mobile so the full UI is reachable ── */
     .terminal-chrome {
         position: relative;
-        top: auto;
         overflow: visible;
     }
 
@@ -2632,7 +2631,7 @@ body.panel-open .dashboard-grid > :not(.agent-modal) {
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
         scrollbar-width: none;
-        /* keep grid-template-columns override from higher breakpoint from applying */
+        /* reset grid-template-columns set by higher breakpoints */
         grid-template-columns: unset;
     }
 
