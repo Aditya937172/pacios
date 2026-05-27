@@ -1619,8 +1619,7 @@ body {
 }
 
 .terminal-chrome {
-    position: relative;
-    z-index: 25;
+    position: static;
     border: 1px solid rgba(156, 145, 130, 0.48);
     border-radius: 22px;
     overflow: hidden;
