@@ -1830,6 +1830,7 @@ body {
 .route-strip {
     display: flex;
     align-items: center;
+    position: static;
     overflow-x: auto;
     gap: 0;
     padding: 0;
