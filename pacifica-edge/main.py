@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
+from starlette.types import Scope
 
 from agents.current_agent import CurrentAgent
 from agents.funding_agent import FundingAgent
@@ -164,7 +165,7 @@ class NoCacheStaticFiles(StaticFiles):
         super().__init__(*args, **kwargs)
         self._headers = headers or {}
 
-    async def get_response(self, path: str, scope) -> Response:
+    async def get_response(self, path: str, scope: Scope) -> Response:
         response = await super().get_response(path, scope)
         if self._headers:
             response.headers.update(self._headers)
