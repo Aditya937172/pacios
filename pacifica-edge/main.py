@@ -159,17 +159,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+class NoCacheStaticFiles(StaticFiles):
+    def __init__(self, *args, headers: dict[str, str] | None = None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._headers = headers or {}
+
+    async def get_response(self, path: str, scope) -> Response:
+        response = await super().get_response(path, scope)
+        if self._headers:
+            response.headers.update(self._headers)
+        return response
+
+
 if UI_DIR.exists():
-    app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")
-
-
-@app.middleware("http")
-async def disable_ui_cache_headers(request: Request, call_next) -> Response:
-    response = await call_next(request)
-    path = request.url.path
-    if path in ("/", "/style.css", "/script.js") or path.startswith("/ui/"):
-        response.headers.update(UI_CACHE_HEADERS)
-    return response
+    app.mount("/ui", NoCacheStaticFiles(directory=UI_DIR, headers=UI_CACHE_HEADERS), name="ui")
 
 
 @app.exception_handler(Exception)
@@ -2774,7 +2777,7 @@ async def get_dashboard_index() -> FileResponse:
     index_path = UI_DIR / "index.html"
     if not index_path.exists():
         raise HTTPException(status_code=404, detail="Dashboard index not found")
-    return FileResponse(index_path)
+    return FileResponse(index_path, headers=UI_CACHE_HEADERS)
 
 
 @app.get("/style.css")
@@ -2783,7 +2786,7 @@ async def get_dashboard_styles() -> FileResponse:
     css_path = UI_DIR / "style.css"
     if not css_path.exists():
         raise HTTPException(status_code=404, detail="Dashboard stylesheet not found")
-    return FileResponse(css_path, media_type="text/css")
+    return FileResponse(css_path, media_type="text/css", headers=UI_CACHE_HEADERS)
 
 
 @app.get("/script.js")
@@ -2792,4 +2795,4 @@ async def get_dashboard_script() -> FileResponse:
     script_path = UI_DIR / "script.js"
     if not script_path.exists():
         raise HTTPException(status_code=404, detail="Dashboard script not found")
-    return FileResponse(script_path, media_type="text/javascript")
+    return FileResponse(script_path, media_type="text/javascript", headers=UI_CACHE_HEADERS)
