@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Final, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -137,6 +137,11 @@ APP_START_TIME = time.time()
 alert_subscriptions: list[dict[str, Any]] = []
 last_signal_state: dict[str, str] = {}
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
+UI_CACHE_HEADERS: Final[dict[str, str]] = {
+    "Cache-Control": "no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 CACHE_TTL_SIGNAL_SECONDS: Final[float] = 20.0
 CACHE_TTL_SIGNAL_DEGRADED_SECONDS: Final[float] = 8.0
 CACHE_TTL_DASHBOARD_SECONDS: Final[float] = 20.0
@@ -156,6 +161,15 @@ app.add_middleware(
 )
 if UI_DIR.exists():
     app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")
+
+
+@app.middleware("http")
+async def disable_ui_cache_headers(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    path = request.url.path
+    if path in ("/", "/style.css", "/script.js") or path.startswith("/ui/"):
+        response.headers.update(UI_CACHE_HEADERS)
+    return response
 
 
 @app.exception_handler(Exception)
